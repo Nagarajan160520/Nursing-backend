@@ -732,68 +732,290 @@ exports.deleteNews = async (req, res) => {
 // @desc    Add new student
 // @route   POST /api/admin/students
 // @access  Private (Admin)
+// @desc    Add new student with auto-generated ID
+// @route   POST /api/admin/students
+// @access  Private (Admin)
 exports.addStudent = async (req, res) => {
-  try {
-    const { email, password, ...studentData } = req.body;
+    try {
+        const { 
+            fullName, 
+            email, 
+            dateOfBirth, 
+            gender, 
+            contactNumber, 
+            courseEnrolled, 
+            batchYear, 
+            semester,
+            guardianName,
+            guardianContact,
+            address
+        } = req.body;
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'User with this email already exists'
-      });
+        // Validate required fields
+        if (!fullName || !email || !courseEnrolled) {
+            return res.status(400).json({
+                success: false,
+                message: 'Required fields: fullName, email, courseEnrolled'
+            });
+        }
+
+        // Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide a valid email address'
+            });
+        }
+
+        // Check if user already exists with this email
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({
+                success: false,
+                message: 'An account with this email already exists'
+            });
+        }
+
+        // Get course details
+        const course = await Course.findById(courseEnrolled);
+        if (!course) {
+            return res.status(400).json({
+                success: false,
+                message: 'Selected course not found'
+            });
+        }
+
+        // Generate auto Student ID: INST/YEAR/SEQUENCE
+        const currentYear = batchYear || new Date().getFullYear();
+        const yearCode = currentYear.toString().slice(-2);
+        const courseCode = course.courseCode.substring(0, 3).toUpperCase();
+        
+        // Find last student ID for this course and year
+        const lastStudent = await Student.findOne({
+            studentId: new RegExp(`^INST/${yearCode}/${courseCode}`)
+        }).sort({ createdAt: -1 });
+
+        let sequence = 1;
+        if (lastStudent && lastStudent.studentId) {
+            const lastSequence = parseInt(lastStudent.studentId.split('/').pop());
+            sequence = lastSequence + 1;
+        }
+
+        // Format sequence as 3-digit number
+        const sequenceStr = sequence.toString().padStart(3, '0');
+        const studentId = `INST/${yearCode}/${courseCode}${sequenceStr}`;
+
+        // Create user account WITHOUT password initially
+        const user = new User({
+            username: studentId, // Use auto-generated student ID as username
+            email: email, // Student's personal email
+            password: 'PENDING_FIRST_LOGIN', // Temporary placeholder
+            role: 'student',
+            isActive: true
+        });
+
+        await user.save();
+
+        // Generate temporary login token for first login
+        const crypto = require('crypto');
+        const firstLoginToken = crypto.randomBytes(32).toString('hex');
+        const tokenExpiry = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
+
+        // Save token to user
+        user.resetPasswordToken = crypto
+            .createHash('sha256')
+            .update(firstLoginToken)
+            .digest('hex');
+        user.resetPasswordExpire = tokenExpiry;
+        await user.save();
+
+        // Create student profile
+        const student = new Student({
+            userId: user._id,
+            studentId: studentId,
+            fullName,
+            email,
+            dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+            gender: gender || 'Other',
+            contactNumber: contactNumber || '',
+            guardianDetails: {
+                name: guardianName || '',
+                contact: guardianContact || ''
+            },
+            address: address || {
+                street: '',
+                city: '',
+                state: '',
+                pincode: ''
+            },
+            courseEnrolled,
+            batchYear: currentYear,
+            semester: semester || 1,
+            academicStatus: 'Active',
+            admissionDate: new Date(),
+            firstLoginRequired: true
+        });
+
+        await student.save();
+
+        // Send welcome email with first login instructions
+        const firstLoginLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/first-login/${firstLoginToken}`;
+        
+        const emailContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: #3498db; color: white; padding: 20px; text-align: center; }
+                .content { padding: 20px; background: #f9f9f9; }
+                .button { display: inline-block; padding: 12px 24px; background: #2ecc71; color: white; text-decoration: none; border-radius: 5px; }
+                .credentials { background: white; padding: 15px; border-left: 4px solid #3498db; margin: 15px 0; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h2>Welcome to ${process.env.INSTITUTE_NAME || 'Nursing Institute'}</h2>
+                </div>
+                <div class="content">
+                    <h3>Dear ${fullName},</h3>
+                    <p>Your student account has been successfully created.</p>
+                    
+                    <div class="credentials">
+                        <p><strong>Student ID:</strong> ${studentId}</p>
+                        <p><strong>Email:</strong> ${email}</p>
+                        <p><strong>Course:</strong> ${course.courseName}</p>
+                        <p><strong>Batch:</strong> ${currentYear}</p>
+                    </div>
+                    
+                    <p>To complete your registration and set your password, please click the button below:</p>
+                    
+                    <p style="text-align: center; margin: 30px 0;">
+                        <a href="${firstLoginLink}" class="button">Set Your Password</a>
+                    </p>
+                    
+                    <p><strong>Important Notes:</strong></p>
+                    <ul>
+                        <li>This link will expire in 7 days</li>
+                        <li>Use your personal email (${email}) to login after setting password</li>
+                        <li>Contact admin if you face any issues</li>
+                    </ul>
+                    
+                    <p>Best regards,<br>
+                    ${process.env.INSTITUTE_NAME || 'Nursing Institute'} Administration</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+        // Send email (using your email service)
+        await sendEmail({
+            email: email,
+            subject: `Welcome to ${process.env.INSTITUTE_NAME || 'Nursing Institute'} - Set Your Password`,
+            html: emailContent
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'Student added successfully. Login instructions sent to student\'s email.',
+            data: {
+                studentId: studentId,
+                email: email,
+                course: course.courseName,
+                firstLoginLink: firstLoginLink, // For admin reference
+                note: 'Student will receive email with password setup link'
+            }
+        });
+
+    } catch (error) {
+        console.error('Add Student Error:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to add student'
+        });
     }
+};
 
-    // Check if student ID already exists
-    const existingStudent = await Student.findOne({ studentId: studentData.studentId });
-    if (existingStudent) {
-      return res.status(400).json({
-        success: false,
-        message: 'Student ID already exists'
-      });
+// @desc    Handle student's first login/password setup
+// @route   POST /api/auth/first-login/:token
+// @access  Public
+exports.firstLoginSetup = async (req, res) => {
+    try {
+        const { token } = req.params;
+        const { password } = req.body;
+
+        if (!password || password.length < 6) {
+            return res.status(400).json({
+                success: false,
+                message: 'Password must be at least 6 characters long'
+            });
+        }
+
+        // Hash token
+        const crypto = require('crypto');
+        const hashedToken = crypto
+            .createHash('sha256')
+            .update(token)
+            .digest('hex');
+
+        // Find user with valid token
+        const user = await User.findOne({
+            resetPasswordToken: hashedToken,
+            resetPasswordExpire: { $gt: Date.now() },
+            password: 'PENDING_FIRST_LOGIN'
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid or expired token'
+            });
+        }
+
+        // Set new password
+        user.password = password;
+        user.resetPasswordToken = undefined;
+        user.resetPasswordExpire = undefined;
+        user.lastLogin = new Date();
+
+        await user.save();
+
+        // Get student profile
+        const student = await Student.findOne({ userId: user._id });
+        
+        // Generate JWT token for immediate login
+        const authToken = user.generateAuthToken();
+
+        res.json({
+            success: true,
+            message: 'Password set successfully. You can now login.',
+            data: {
+                token: authToken,
+                user: {
+                    _id: user._id,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role
+                },
+                student: student ? {
+                    studentId: student.studentId,
+                    fullName: student.fullName,
+                    courseEnrolled: student.courseEnrolled
+                } : null
+            }
+        });
+
+    } catch (error) {
+        console.error('First Login Setup Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to set password'
+        });
     }
-
-    // Create user account
-    const user = new User({
-      username: studentData.studentId,
-      email,
-      password: password || 'password123', // Default password
-      role: 'student'
-    });
-    await user.save();
-
-    // Create student profile
-    const student = new Student({
-      userId: user._id,
-      email: user.email,
-      ...studentData
-    });
-    await student.save();
-
-    // Send welcome email with credentials (optional)
-    // await sendWelcomeEmail(user.email, studentData.studentId, password);
-
-    res.status(201).json({
-      success: true,
-      message: 'Student added successfully',
-      data: {
-        user: {
-          _id: user._id,
-          username: user.username,
-          email: user.email,
-          role: user.role
-        },
-        student
-      }
-    });
-  } catch (error) {
-    console.error('Add Student Error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message || 'Failed to add student'
-    });
-  }
 };
 
 // @desc    Get all students
