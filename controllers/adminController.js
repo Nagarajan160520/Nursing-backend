@@ -11,6 +11,8 @@ const Notification = require('../models/Notification');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const sendEmail = require('../utils/sendEmail');
+const fs = require('fs');
+const nodemailer = require('nodemailer');
 
 // @desc    Get admin dashboard statistics
 // @route   GET /api/admin/dashboard/stats
@@ -757,10 +759,15 @@ const generateStudentId = async (batchYear, courseCode) => {
     return `${courseCode}-${batchYear}-${Date.now().toString().slice(-3)}`;
   }
 };
-// Update the Student ID generation logic in addStudent function:
-
+// @desc    Add new student (SIMPLIFIED WORKING VERSION)
+// @route   POST /api/admin/students
+// @access  Private (Admin)
 exports.addStudent = async (req, res) => {
+  console.log('📝 ADD STUDENT REQUEST RECEIVED');
+  console.log('Request Body:', JSON.stringify(req.body, null, 2));
+  
   try {
+    // Extract data with defaults
     const {
       firstName,
       lastName,
@@ -768,39 +775,63 @@ exports.addStudent = async (req, res) => {
       mobileNumber,
       courseEnrolled,
       dateOfBirth,
-      gender,
+      gender = 'Male',
       bloodGroup,
       fatherName,
       fatherMobile,
       motherName,
       motherMobile,
-      permanentAddress,
-      correspondenceAddress,
-      admissionType,
-      admissionQuota,
-      semester,
+      permanentAddress = {},
+      correspondenceAddress = {},
+      admissionType = 'Regular',
+      admissionQuota = 'General',
+      semester = 1,
       rollNumber,
-      qualification,
+      qualification = '12th',
       boardUniversity,
       passingYear,
       percentage,
       schoolCollege,
-      requireHostel,
-      requireTransport,
-      hostelType,
-      transportRoute,
-      documents
+      requireHostel = false,
+      requireTransport = false,
+      hostelType = 'Boys',
+      transportRoute
     } = req.body;
 
-    // ✅ 1. VALIDATE REQUIRED FIELDS
+    // DEBUG: Log what we received
+    console.log('📋 Parsed Fields:');
+    console.log('firstName:', firstName);
+    console.log('lastName:', lastName);
+    console.log('personalEmail:', personalEmail);
+    console.log('mobileNumber:', mobileNumber);
+    console.log('courseEnrolled:', courseEnrolled);
+    console.log('permanentAddress:', permanentAddress);
+
+    // Validate required fields
     if (!firstName || !lastName || !personalEmail || !mobileNumber || !courseEnrolled) {
+      const missingFields = [];
+      if (!firstName) missingFields.push('firstName');
+      if (!lastName) missingFields.push('lastName');
+      if (!personalEmail) missingFields.push('personalEmail');
+      if (!mobileNumber) missingFields.push('mobileNumber');
+      if (!courseEnrolled) missingFields.push('courseEnrolled');
+      
+      console.log('❌ Missing fields:', missingFields);
+      
       return res.status(400).json({
         success: false,
-        message: 'Required fields: firstName, lastName, personalEmail, mobileNumber, courseEnrolled'
+        message: `Required fields: ${missingFields.join(', ')}`,
+        details: {
+          firstName: firstName || 'MISSING',
+          lastName: lastName || 'MISSING',
+          personalEmail: personalEmail || 'MISSING',
+          mobileNumber: mobileNumber || 'MISSING',
+          courseEnrolled: courseEnrolled || 'MISSING'
+        }
       });
     }
 
-    // ✅ 2. VALIDATE EMAIL FORMAT
+    // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(personalEmail)) {
       return res.status(400).json({
@@ -809,14 +840,8 @@ exports.addStudent = async (req, res) => {
       });
     }
 
-    // ✅ 3. CHECK IF PERSONAL EMAIL ALREADY EXISTS
-    const existingStudentWithEmail = await Student.findOne({ 
-      $or: [
-        { personalEmail: personalEmail },
-        { email: personalEmail }
-      ]
-    });
-    
+    // Check if personal email already exists
+    const existingStudentWithEmail = await Student.findOne({ personalEmail });
     if (existingStudentWithEmail) {
       return res.status(400).json({
         success: false,
@@ -824,196 +849,94 @@ exports.addStudent = async (req, res) => {
       });
     }
 
-    // ✅ 4. GET COURSE DETAILS
-    const course = await Course.findById(courseEnrolled);
-    if (!course) {
-      return res.status(404).json({
+    // Get course details
+    let course;
+    try {
+      course = await Course.findById(courseEnrolled);
+      if (!course) {
+        return res.status(404).json({
+          success: false,
+          message: 'Course not found'
+        });
+      }
+    } catch (courseError) {
+      return res.status(400).json({
         success: false,
-        message: 'Course not found'
+        message: 'Invalid course ID format'
       });
     }
 
-    // ✅ 5. GENERATE UNIQUE STUDENT ID (FIXED LOGIC)
-    const generateUniqueStudentId = async (courseCode) => {
-      const year = new Date().getFullYear();
-      const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-      
-      // Try multiple attempts to get unique ID
-      for (let attempt = 1; attempt <= 10; attempt++) {
-        // Get count of students in this course for current month
-        const startOfMonth = new Date(year, new Date().getMonth(), 1);
-        const endOfMonth = new Date(year, new Date().getMonth() + 1, 0);
-        
-        const monthlyCount = await Student.countDocuments({
-          courseEnrolled,
-          admissionDate: {
-            $gte: startOfMonth,
-            $lte: endOfMonth
-          }
-        });
-        
-        const sequence = (monthlyCount + attempt).toString().padStart(3, '0');
-        const studentId = `${courseCode}${year}${month}${sequence}`;
-        
-        // Check if this ID already exists
-        const existingStudent = await Student.findOne({ studentId });
-        if (!existingStudent) {
-          return studentId;
-        }
-      }
-      
-      // If all attempts fail, generate with timestamp
-      return `${courseCode}${year}${month}${Date.now().toString().slice(-3)}`;
-    };
+    // Generate Student ID
+    const year = new Date().getFullYear();
+    const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+    
+    // Get count of students in this course for this year
+    const studentCount = await Student.countDocuments({
+      courseEnrolled,
+      admissionYear: year
+    });
+    
+    const sequence = (studentCount + 1).toString().padStart(3, '0');
+    const studentId = `${course.courseCode}${year}${month}${sequence}`;
+    
+    console.log('🎯 Generated Student ID:', studentId);
 
-    const studentId = await generateUniqueStudentId(course.courseCode);
+    // Generate Institute Email
+    const cleanFirstName = firstName.toLowerCase().replace(/[^a-z]/g, '');
+    const cleanLastName = lastName.toLowerCase().replace(/[^a-z]/g, '');
+    const instituteEmail = `${cleanFirstName}.${cleanLastName}.${sequence}@nursinginstitute.edu`;
+    
+    console.log('📧 Generated Institute Email:', instituteEmail);
 
-    // ✅ 6. GENERATE UNIQUE INSTITUTE EMAIL (FIXED LOGIC)
-    const generateUniqueInstituteEmail = async (firstName, lastName, studentId) => {
-      const cleanFirstName = firstName.toLowerCase().replace(/[^a-z]/g, '');
-      const cleanLastName = lastName.toLowerCase().replace(/[^a-z]/g, '');
-      const randomSuffix = Math.floor(100 + Math.random() * 900); // 100-999
-      
-      // Try multiple email formats
-      const emailFormats = [
-        `${cleanFirstName}.${cleanLastName}.${studentId.substring(studentId.length - 3)}@nursinginstitute.edu`,
-        `${cleanFirstName}.${cleanLastName}.${randomSuffix}@nursinginstitute.edu`,
-        `${cleanFirstName[0]}${cleanLastName}.${studentId.substring(studentId.length - 4)}@nursinginstitute.edu`,
-        `student.${studentId}@nursinginstitute.edu`
-      ];
-      
-      for (const emailFormat of emailFormats) {
-        const existingUser = await User.findOne({ email: emailFormat });
-        if (!existingUser) {
-          return emailFormat;
-        }
-      }
-      
-      // If all formats exist, use timestamp
-      return `student.${studentId}.${Date.now().toString().slice(-6)}@nursinginstitute.edu`;
-    };
-
-    const instituteEmail = await generateUniqueInstituteEmail(firstName, lastName, studentId);
-
-    // ✅ 7. CHECK IF INSTITUTE EMAIL EXISTS (DOUBLE CHECK)
+    // Check if institute email exists
     const existingUser = await User.findOne({ email: instituteEmail });
     if (existingUser) {
-      // Generate new one with timestamp
-      instituteEmail = `student.${studentId}.${Date.now().toString().slice(-6)}@nursinginstitute.edu`;
+      // If email exists, add random number
+      const randomNum = Math.floor(Math.random() * 100);
+      const instituteEmail = `${cleanFirstName}.${cleanLastName}.${sequence}${randomNum}@nursinginstitute.edu`;
     }
 
-    // ✅ 8. GENERATE STRONG PASSWORD
-    const generateStrongPassword = () => {
-      const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-      const numbers = '0123456789';
-      const symbols = '!@#$%';
-      
-      let password = '';
-      
-      // Ensure at least one of each type
-      password += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
-      password += lowercase.charAt(Math.floor(Math.random() * lowercase.length));
-      password += numbers.charAt(Math.floor(Math.random() * numbers.length));
-      password += symbols.charAt(Math.floor(Math.random() * symbols.length));
-      
-      // Fill remaining 4 characters
-      const allChars = uppercase + lowercase + numbers + symbols;
-      for (let i = 0; i < 4; i++) {
-        password += allChars.charAt(Math.floor(Math.random() * allChars.length));
-      }
-      
-      // Shuffle the password
-      return password.split('').sort(() => 0.5 - Math.random()).join('');
-    };
-    
-    const password = generateStrongPassword();
+    // Generate Strong Password (StudentID@123)
+    const password = studentId + '@123';
+    console.log('🔑 Generated Password:', password);
 
-    // ✅ 9. HASH PASSWORD
+    // Hash password for storage
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // ✅ 10. CREATE USER ACCOUNT
+    // Create User Account
     const user = new User({
       username: studentId,
       email: instituteEmail,
       password: hashedPassword,
       role: 'student',
-      isActive: true,
-      lastLogin: null
+      isActive: true
     });
 
     await user.save();
+    console.log('✅ User account created:', user._id);
 
-    // ✅ 11. PROCESS DOCUMENTS CORRECTLY
-    const processDocuments = (docsObj) => {
-      if (!docsObj || typeof docsObj !== 'object') return [];
-      
-      const documentMap = {
-        'aadhar': 'Aadhar',
-        'tc': 'TC',
-        'marksheet': 'MarkSheet',
-        'photo': 'Photo',
-        'medical': 'Medical',
-        'caste': 'Caste',
-        'income': 'Income',
-        'other': 'Other'
-      };
-      
-      const processedDocs = [];
-      
-      Object.entries(docsObj).forEach(([key, value]) => {
-        const docType = documentMap[key.toLowerCase()];
-        if (value === true && docType) {
-          processedDocs.push({
-            documentType: docType,
-            documentName: `${docType} Certificate`,
-            documentUrl: '',
-            uploadedAt: null,
-            verified: false
-          });
-        }
-      });
-      
-      return processedDocs;
-    };
-
-    // ✅ 12. CREATE STUDENT PROFILE
-    const student = new Student({
+    // Prepare student data
+    const studentData = {
       userId: user._id,
       studentId: studentId,
-      firstName: firstName,
-      lastName: lastName,
-      fullName: `${firstName} ${lastName}`,
-      
-      // Required fields by model
-      email: personalEmail,
-      personalEmail: personalEmail,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      fullName: `${firstName.trim()} ${lastName.trim()}`,
+      personalEmail: personalEmail.trim(),
       instituteEmail: instituteEmail,
-      
-      contactNumber: mobileNumber,
-      mobileNumber: mobileNumber,
-      
-      batchYear: req.body.batchYear || new Date().getFullYear(),
-      
+      mobileNumber: mobileNumber.trim(),
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-      gender: gender || 'Other',
+      gender: gender,
       bloodGroup: bloodGroup || '',
       
       // Address
       address: {
-        street: permanentAddress?.addressLine1 || '',
-        city: permanentAddress?.city || '',
-        state: permanentAddress?.state || '',
-        pincode: permanentAddress?.pincode || '',
-        country: permanentAddress?.country || 'India'
-      },
-      
-      correspondenceAddress: correspondenceAddress?.sameAsPermanent ? null : {
-        street: correspondenceAddress?.addressLine1 || '',
-        city: correspondenceAddress?.city || '',
-        state: correspondenceAddress?.state || '',
-        pincode: correspondenceAddress?.pincode || ''
+        street: permanentAddress.addressLine1 || '',
+        city: permanentAddress.city || '',
+        state: permanentAddress.state || '',
+        pincode: permanentAddress.pincode || '',
+        country: permanentAddress.country || 'India'
       },
       
       // Guardian Details
@@ -1031,16 +954,16 @@ exports.addStudent = async (req, res) => {
       
       // Academic Details
       courseEnrolled: courseEnrolled,
-      admissionYear: new Date().getFullYear(),
-      admissionType: admissionType || 'Regular',
-      admissionQuota: admissionQuota || 'General',
+      admissionYear: year,
+      admissionType: admissionType,
+      admissionQuota: admissionQuota,
       semester: parseInt(semester) || 1,
       rollNumber: rollNumber || '',
       admissionDate: new Date(),
       
       // Previous Education
       previousEducation: {
-        qualification: qualification || '12th',
+        qualification: qualification,
         boardUniversity: boardUniversity || '',
         passingYear: passingYear || '',
         percentage: percentage || '',
@@ -1048,22 +971,19 @@ exports.addStudent = async (req, res) => {
       },
       
       // Facilities
-      hostelAllotted: requireHostel || false,
+      hostelAllotted: requireHostel,
       hostelDetails: requireHostel ? {
         hostelName: `${hostelType} Hostel`,
         roomNumber: 'To be allocated',
         fees: hostelType === 'Boys' ? 50000 : 55000
       } : null,
       
-      transportFacility: requireTransport || false,
+      transportFacility: requireTransport,
       transportDetails: requireTransport ? {
         routeNumber: transportRoute || 'Route 1',
         pickupPoint: 'To be assigned',
         fees: 15000
       } : null,
-      
-      // Documents
-      documents: processDocuments(documents),
       
       // Status
       academicStatus: 'Active',
@@ -1076,27 +996,53 @@ exports.addStudent = async (req, res) => {
         feesPaid: 0,
         pendingFees: course.feesStructure?.totalFee || 50000,
         lastPaymentDate: null
-      },
-      
-      // Payment History
-      paymentHistory: []
-    });
+      }
+    };
 
-    await student.save();
-
-    // ✅ 13. SEND EMAIL
-    try {
-      await sendStudentCredentials({
-        studentName: `${firstName} ${lastName}`,
-        personalEmail: personalEmail,
-        instituteEmail: instituteEmail,
-        studentId: studentId,
-        password: password
-      });
-    } catch (emailError) {
-      console.error('Email sending failed:', emailError);
-      // Continue even if email fails
+    // Handle correspondence address if different
+    if (correspondenceAddress && !correspondenceAddress.sameAsPermanent) {
+      studentData.correspondenceAddress = {
+        street: correspondenceAddress.addressLine1 || '',
+        city: correspondenceAddress.city || '',
+        state: correspondenceAddress.state || '',
+        pincode: correspondenceAddress.pincode || ''
+      };
     }
+
+    // Handle documents if provided
+    if (req.body.documents) {
+      studentData.documents = Object.entries(req.body.documents).map(([type, submitted]) => ({
+        documentType: type,
+        documentName: `${type.charAt(0).toUpperCase() + type.slice(1)} Certificate`,
+        documentUrl: submitted ? `/uploads/documents/${studentId}_${type}.pdf` : '',
+        uploadedAt: submitted ? new Date() : null,
+        verified: false
+      }));
+    }
+
+    // Create Student Profile
+    const student = new Student(studentData);
+    await student.save();
+    console.log('✅ Student profile created:', student._id);
+
+    // Send welcome email (async - don't wait)
+    setTimeout(async () => {
+      try {
+        await sendStudentCredentials({
+          studentName: `${firstName} ${lastName}`,
+          personalEmail: personalEmail,
+          instituteEmail: instituteEmail,
+          studentId: studentId,
+          password: password
+        });
+        console.log('📧 Welcome email sent successfully');
+      } catch (emailError) {
+        console.error('❌ Failed to send email:', emailError.message);
+        // Don't fail the request if email fails
+      }
+    }, 0);
+
+    console.log('🎉 Student created successfully!');
 
     res.status(201).json({
       success: true,
@@ -1109,12 +1055,13 @@ exports.addStudent = async (req, res) => {
           personalEmail: personalEmail,
           instituteEmail: instituteEmail,
           course: course.courseName,
-          batchYear: student.batchYear
+          admissionDate: student.admissionDate
         },
         credentials: {
           studentId: studentId,
           instituteEmail: instituteEmail,
           password: password,
+          loginUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
           note: 'Please change password on first login'
         }
       }
@@ -1122,8 +1069,9 @@ exports.addStudent = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Add Student Error:', error);
+    console.error('Error Stack:', error.stack);
     
-    // Clean up if student creation failed
+    // Clean up if student creation failed but user was created
     if (req.body.studentId) {
       await User.findOneAndDelete({ username: req.body.studentId });
     }
@@ -1131,109 +1079,45 @@ exports.addStudent = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to add student',
-      validationErrors: error.errors ? Object.keys(error.errors) : [],
-      errorDetails: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      ...(process.env.NODE_ENV === 'development' && { stack: error.stack })
     });
   }
 };
-// Helper: Send student credentials email
+// Helper: Send student credentials email (UPDATED)
 const sendStudentCredentials = async ({ studentName, personalEmail, instituteEmail, studentId, password }) => {
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
 
-  const mailOptions = {
-    from: `"Nursing Institute" <${process.env.EMAIL_USER}>`,
-    to: personalEmail,
-    cc: process.env.ADMIN_EMAIL,
-    subject: 'Welcome to Nursing Institute - Your Login Credentials',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: linear-gradient(to right, #1e40af, #3b82f6); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
-          <h1 style="margin: 0;">🎓 Nursing Institute</h1>
-          <p style="margin: 5px 0 0 0; font-size: 18px;">Excellence in Healthcare Education</p>
-        </div>
-        
-        <div style="padding: 30px; background: #f8fafc; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0;">
-          <h2 style="color: #1e40af;">Welcome ${studentName}!</h2>
-          <p>Your admission to Nursing Institute has been processed successfully. We are pleased to welcome you to our institute.</p>
-          
-          <div style="background: white; border: 2px solid #3b82f6; border-radius: 10px; padding: 20px; margin: 20px 0;">
-            <h3 style="color: #1e40af; margin-top: 0;">Your Login Credentials</h3>
-            
-            <table style="width: 100%; border-collapse: collapse;">
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>Student ID:</strong></td>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #1e40af;">${studentId}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>Institute Email:</strong></td>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #1e40af;">${instituteEmail}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>Password:</strong></td>
-                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #ef4444;">${password}</td>
-              </tr>
-              <tr>
-                <td style="padding: 10px;"><strong>Login URL:</strong></td>
-                <td style="padding: 10px;">
-                  <a href="${process.env.FRONTEND_URL}/login" style="color: #3b82f6; text-decoration: none;">
-                    ${process.env.FRONTEND_URL}/login
-                  </a>
-                </td>
-              </tr>
-            </table>
-          </div>
-          
-          <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-            <h4 style="color: #d97706; margin-top: 0;">⚠️ Important Instructions</h4>
-            <ol style="margin: 0; padding-left: 20px;">
-              <li><strong>Change your password immediately</strong> after first login</li>
-              <li>Use your <strong>Institute Email</strong> for all academic communications</li>
-              <li>Check your institute email regularly for updates</li>
-              <li>Your Student ID must be mentioned in all communications</li>
-            </ol>
-          </div>
-          
-          <div style="background: #ecfdf5; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0;">
-            <h4 style="color: #059669; margin-top: 0;">📅 Next Steps</h4>
-            <ul style="margin: 0; padding-left: 20px;">
-              <li>Complete your profile in the Student Portal</li>
-              <li>Upload required documents within 7 days</li>
-              <li>Check the academic calendar for important dates</li>
-              <li>Join the orientation program (Date will be announced)</li>
-            </ul>
-          </div>
-          
-          <p style="text-align: center; margin-top: 30px;">
-            <a href="${process.env.FRONTEND_URL}/login" style="background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
-              Go to Student Portal
-            </a>
-          </p>
-          
-          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
-          
-          <div style="text-align: center; color: #64748b; font-size: 14px;">
-            <p>For any queries, contact:</p>
-            <p>
-              📞 Admission Office: +91 9876543210<br>
-              📧 Email: admissions@nursinginstitute.edu<br>
-              🏢 Address: Nursing Institute Campus, Education City, State - 600001
-            </p>
-            <p style="margin-top: 20px;">
-              <em>This is an automated email. Please do not reply.</em>
-            </p>
-          </div>
-        </div>
-      </div>
-    `
-  };
+    const mailOptions = {
+      from: `"Nursing Institute" <${process.env.EMAIL_USER}>`,
+      to: personalEmail,
+      subject: 'Welcome to Nursing Institute - Your Login Credentials',
+      html: `
+        <h2>Welcome ${studentName}!</h2>
+        <p>Your admission to Nursing Institute has been processed successfully.</p>
+        <h3>Your Login Credentials:</h3>
+        <ul>
+          <li><strong>Student ID:</strong> ${studentId}</li>
+          <li><strong>Institute Email:</strong> ${instituteEmail}</li>
+          <li><strong>Password:</strong> ${password}</li>
+          <li><strong>Login URL:</strong> ${process.env.FRONTEND_URL || 'http://localhost:3000'}/login</li>
+        </ul>
+        <p><strong>Important:</strong> Change your password after first login.</p>
+      `
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
+    console.log('✅ Email sent to:', personalEmail);
+  } catch (error) {
+    console.error('❌ Email sending failed:', error);
+    throw error;
+  }
 };
 
 // @desc    Handle student's first login/password setup
@@ -1314,7 +1198,7 @@ exports.firstLoginSetup = async (req, res) => {
     }
 };
 
-// @desc    Get all students with filters
+// @desc    Get all students with filters (UPDATED)
 // @route   GET /api/admin/students
 // @access  Private (Admin)
 exports.getAllStudents = async (req, res) => {
@@ -1323,8 +1207,8 @@ exports.getAllStudents = async (req, res) => {
       search, 
       course, 
       semester, 
-      academicStatus, 
-      batchYear,
+      status, 
+      batch,
       page = 1,
       limit = 10
     } = req.query;
@@ -1344,7 +1228,7 @@ exports.getAllStudents = async (req, res) => {
     }
 
     // Course filter
-    if (course && mongoose.Types.ObjectId.isValid(course)) {
+    if (course) {
       query.courseEnrolled = course;
     }
 
@@ -1354,62 +1238,35 @@ exports.getAllStudents = async (req, res) => {
     }
 
     // Status filter
-    if (academicStatus) {
-      query.academicStatus = academicStatus;
+    if (status) {
+      query.academicStatus = status;
     }
 
-    // Batch year filter
-    if (batchYear) {
-      query.admissionYear = parseInt(batchYear);
+    // Batch filter
+    if (batch) {
+      query.batchYear = parseInt(batch);
     }
 
     // Get students with pagination
     const students = await Student.find(query)
-      .populate('courseEnrolled', 'courseName courseCode duration')
+      .populate('courseEnrolled', 'courseName courseCode')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .select('-__v -userId');
+      .select('-__v');
 
-    // Get total count for pagination
+    // Get total count
     const total = await Student.countDocuments(query);
 
     // Get statistics
     const stats = {
       total: await Student.countDocuments(),
       active: await Student.countDocuments({ academicStatus: 'Active' }),
-      completed: await Student.countDocuments({ academicStatus: 'Completed' }),
-      onLeave: await Student.countDocuments({ academicStatus: 'On Leave' }),
-      discontinued: await Student.countDocuments({ academicStatus: 'Discontinued' })
+      male: await Student.countDocuments({ gender: 'Male' }),
+      female: await Student.countDocuments({ gender: 'Female' }),
+      withHostel: await Student.countDocuments({ hostelAllotted: true }),
+      withTransport: await Student.countDocuments({ transportFacility: true })
     };
-
-    // Course-wise distribution
-    const courseWise = await Student.aggregate([
-      {
-        $group: {
-          _id: '$courseEnrolled',
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $lookup: {
-          from: 'courses',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'course'
-        }
-      },
-      {
-        $unwind: '$course'
-      },
-      {
-        $project: {
-          courseName: '$course.courseName',
-          courseCode: '$course.courseCode',
-          count: 1
-        }
-      }
-    ]);
 
     res.json({
       success: true,
@@ -1421,12 +1278,7 @@ exports.getAllStudents = async (req, res) => {
           total,
           pages: Math.ceil(total / parseInt(limit))
         },
-        stats,
-        distribution: {
-          courses: courseWise,
-          semesterWise: await getSemesterWiseDistribution(),
-          statusWise: await getStatusWiseDistribution()
-        }
+        stats
       }
     });
 
@@ -1468,15 +1320,14 @@ const getStatusWiseDistribution = async () => {
     }
   ]);
 };
-// @desc    Get student by ID
+// @desc    Get single student by ID
 // @route   GET /api/admin/students/:id
 // @access  Private (Admin)
 exports.getStudentById = async (req, res) => {
   try {
     const student = await Student.findById(req.params.id)
-      .populate('courseEnrolled')
-      .populate('userId', 'username email isActive lastLogin')
-      .select('-__v');
+      .populate('courseEnrolled', 'courseName courseCode duration')
+      .populate('userId', 'username email isActive lastLogin');
 
     if (!student) {
       return res.status(404).json({
@@ -1485,71 +1336,9 @@ exports.getStudentById = async (req, res) => {
       });
     }
 
-    // Get attendance summary
-    const attendanceSummary = await Attendance.aggregate([
-      {
-        $match: { 
-          student: student._id,
-          isHoliday: false 
-        }
-      },
-      {
-        $group: {
-          _id: '$subject',
-          total: { $sum: 1 },
-          present: {
-            $sum: {
-              $cond: [{ $in: ['$status', ['Present', 'Late']] }, 1, 0]
-            }
-          }
-        }
-      }
-    ]);
-
-    // Get marks summary
-    const marksSummary = await Marks.find({ student: student._id })
-      .sort({ semester: 1, examDate: -1 })
-      .select('subject semester examType marks.obtained percentage grade resultStatus')
-      .limit(10);
-
-    // Calculate GPA
-    const gpa = await calculateGPA(student._id);
-
-    // Get fees status
-    const feesStatus = {
-      totalFees: student.fees?.totalFees || 0,
-      paid: student.fees?.feesPaid || 0,
-      pending: student.fees?.pendingFees || 0,
-      lastPayment: student.fees?.lastPaymentDate,
-      paymentHistory: student.paymentHistory || []
-    };
-
-    // Get documents status
-    const documentsStatus = student.documents?.map(doc => ({
-      type: doc.documentType,
-      name: doc.documentName,
-      uploaded: !!doc.documentUrl,
-      verified: doc.verified,
-      uploadedAt: doc.uploadedAt
-    })) || [];
-
     res.json({
       success: true,
-      data: {
-        student,
-        academic: {
-          attendance: {
-            summary: attendanceSummary,
-            percentage: student.attendancePercentage || 0
-          },
-          marks: marksSummary,
-          gpa: gpa.toFixed(2)
-        },
-        fees: feesStatus,
-        documents: documentsStatus,
-        hostel: student.hostelDetails,
-        transport: student.transportDetails
-      }
+      data: student
     });
 
   } catch (error) {
@@ -1560,33 +1349,6 @@ exports.getStudentById = async (req, res) => {
     });
   }
 };
-
-// Helper: Calculate GPA
-const calculateGPA = async (studentId) => {
-  const marks = await Marks.find({ 
-    student: studentId,
-    resultStatus: 'Pass'
-  });
-
-  if (marks.length === 0) return 0;
-
-  const gradePoints = {
-    'O': 10, 'A+': 9, 'A': 8, 'B+': 7, 'B': 6, 'C': 5, 'D': 4, 'F': 0
-  };
-
-  let totalPoints = 0;
-  let totalCredits = 0;
-
-  marks.forEach(mark => {
-    const points = gradePoints[mark.grade] || 0;
-    const credits = 4; // Assuming each subject has 4 credits
-    totalPoints += points * credits;
-    totalCredits += credits;
-  });
-
-  return totalCredits > 0 ? totalPoints / totalCredits : 0;
-};
-
 
 // @desc    Get student details
 // @route   GET /api/admin/students/:id
@@ -1659,7 +1421,7 @@ exports.getStudentDetails = async (req, res) => {
   }
 };
 
-// @desc    Update student
+// @desc    Update student profile
 // @route   PUT /api/admin/students/:id
 // @access  Private (Admin)
 exports.updateStudent = async (req, res) => {
@@ -1678,14 +1440,13 @@ exports.updateStudent = async (req, res) => {
     // Fields that can be updated
     const allowedUpdates = [
       'firstName', 'lastName', 'fullName',
-      'mobileNumber', 'alternateContact', 'whatsappNumber',
+      'mobileNumber', 'contactNumber',
       'dateOfBirth', 'gender', 'bloodGroup',
-      'address', 'correspondenceAddress',
+      'address', 
       'guardianDetails',
       'courseEnrolled', 'semester', 'rollNumber',
-      'academicStatus',
-      'hostelAllotted', 'hostelDetails',
-      'transportFacility', 'transportDetails',
+      'academicStatus', 'batchYear',
+      'hostelAllotted', 'transportFacility',
       'documents',
       'fees'
     ];
@@ -1693,29 +1454,13 @@ exports.updateStudent = async (req, res) => {
     // Apply updates
     Object.keys(updates).forEach(key => {
       if (allowedUpdates.includes(key)) {
-        if (key === 'documents' && Array.isArray(updates[key])) {
-          student[key] = updates[key];
-        } else if (typeof updates[key] === 'object' && updates[key] !== null) {
-          student[key] = { ...student[key], ...updates[key] };
-        } else {
-          student[key] = updates[key];
-        }
+        student[key] = updates[key];
       }
     });
 
-    // Update full name if first/last name changed
+    // Update full name
     if (updates.firstName || updates.lastName) {
       student.fullName = `${updates.firstName || student.firstName} ${updates.lastName || student.lastName}`;
-    }
-
-    // Update user email if institute email changed
-    if (updates.instituteEmail && updates.instituteEmail !== student.instituteEmail) {
-      const user = await User.findById(student.userId);
-      if (user) {
-        user.email = updates.instituteEmail;
-        await user.save();
-        student.instituteEmail = updates.instituteEmail;
-      }
     }
 
     await student.save();
@@ -1750,25 +1495,13 @@ exports.deleteStudent = async (req, res) => {
       });
     }
 
-    // Check if student can be deleted
-    if (student.academicStatus === 'Active') {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete active student. Change status first.'
-      });
-    }
-
     // Delete user account
-    await User.findByIdAndDelete(student.userId);
+    if (student.userId) {
+      await User.findByIdAndDelete(student.userId);
+    }
 
     // Delete student profile
     await Student.findByIdAndDelete(id);
-
-    // Delete related data
-    await Promise.all([
-      Attendance.deleteMany({ student: id }),
-      Marks.deleteMany({ student: id })
-    ]);
 
     res.json({
       success: true,
@@ -1796,7 +1529,6 @@ exports.bulkUploadStudents = async (req, res) => {
       });
     }
 
-    const filePath = req.file.path;
     const results = {
       total: 0,
       success: 0,
@@ -1804,81 +1536,53 @@ exports.bulkUploadStudents = async (req, res) => {
       errors: []
     };
 
-    const studentsData = [];
-    const errors = [];
+    // Read CSV
+    const csvData = fs.readFileSync(req.file.path, 'utf8');
+    const rows = csvData.split('\n').slice(1); // Skip header
 
-    // Read CSV file
-    const readCSV = () => {
-      return new Promise((resolve, reject) => {
-        fs.createReadStream(filePath)
-          .pipe(csv())
-          .on('data', (row) => {
-            studentsData.push(row);
-          })
-          .on('end', () => {
-            resolve();
-          })
-          .on('error', (error) => {
-            reject(error);
-          });
-      });
-    };
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i].trim();
+      if (!row) continue;
 
-    await readCSV();
-
-    // Process each row
-    for (let i = 0; i < studentsData.length; i++) {
-      const row = studentsData[i];
-      const rowNumber = i + 2; // +2 because header is row 1
+      const columns = row.split(',');
+      if (columns.length < 8) {
+        results.failed++;
+        results.errors.push({ row: i + 2, error: 'Invalid CSV format' });
+        continue;
+      }
 
       try {
-        // Validate required fields
-        if (!row.firstName || !row.lastName || !row.personalEmail || !row.mobileNumber || !row.courseCode) {
-          throw new Error('Missing required fields');
-        }
+        const [firstName, lastName, email, mobile, courseCode, gender, dob, fatherName] = columns;
 
-        // Validate email
-        if (!row.personalEmail.includes('@')) {
-          throw new Error('Invalid email format');
-        }
-
-        // Find course by code
-        const course = await Course.findOne({ courseCode: row.courseCode.toUpperCase() });
+        // Find course
+        const course = await Course.findOne({ courseCode: courseCode.trim().toUpperCase() });
         if (!course) {
-          throw new Error(`Course ${row.courseCode} not found`);
+          throw new Error(`Course ${courseCode} not found`);
         }
 
-        // Check if email already exists
-        const existingStudent = await Student.findOne({ personalEmail: row.personalEmail });
+        // Check duplicate email
+        const existingStudent = await Student.findOne({ personalEmail: email.trim() });
         if (existingStudent) {
           throw new Error('Email already exists');
         }
 
         // Generate Student ID
-        const year = row.admissionYear || new Date().getFullYear();
+        const year = new Date().getFullYear();
         const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-        const studentCount = await Student.countDocuments({
+        const count = await Student.countDocuments({
           courseEnrolled: course._id,
           admissionYear: year
         });
-        const sequence = (studentCount + 1).toString().padStart(3, '0');
+        const sequence = (count + 1).toString().padStart(3, '0');
         const studentId = `${course.courseCode}${year}${month}${sequence}`;
 
         // Generate Institute Email
-        const cleanFirstName = row.firstName.toLowerCase().replace(/[^a-z]/g, '');
-        const cleanLastName = row.lastName.toLowerCase().replace(/[^a-z]/g, '');
+        const cleanFirstName = firstName.toLowerCase().replace(/[^a-z]/g, '');
+        const cleanLastName = lastName.toLowerCase().replace(/[^a-z]/g, '');
         const instituteEmail = `${cleanFirstName}.${cleanLastName}.${studentId.substring(studentId.length - 3)}@nursinginstitute.edu`;
 
         // Generate Password
-        const generatePassword = () => {
-          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-          let password = '';
-          for (let i = 0; i < 12; i++) {
-            password += chars.charAt(Math.floor(Math.random() * chars.length));
-          }
-          return password;
-        };
-        const password = generatePassword();
+        const password = generateRandomPassword();
 
         // Hash password
         const salt = await bcrypt.genSalt(10);
@@ -1898,69 +1602,43 @@ exports.bulkUploadStudents = async (req, res) => {
         const student = new Student({
           userId: user._id,
           studentId: studentId,
-          firstName: row.firstName,
-          lastName: row.lastName,
-          fullName: `${row.firstName} ${row.lastName}`,
-          personalEmail: row.personalEmail,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          fullName: `${firstName.trim()} ${lastName.trim()}`,
+          email: email.trim(),
+          personalEmail: email.trim(),
           instituteEmail: instituteEmail,
-          mobileNumber: row.mobileNumber,
-          dateOfBirth: row.dateOfBirth || null,
-          gender: row.gender || 'Other',
+          contactNumber: mobile.trim(),
+          mobileNumber: mobile.trim(),
+          gender: gender.trim() || 'Other',
+          dateOfBirth: dob.trim() || null,
           courseEnrolled: course._id,
-          admissionYear: parseInt(year),
-          admissionType: row.admissionType || 'Regular',
-          admissionQuota: row.admissionQuota || 'General',
-          semester: parseInt(row.semester) || 1,
+          batchYear: year,
+          admissionYear: year,
+          semester: 1,
           academicStatus: 'Active',
           admissionDate: new Date(),
-          previousEducation: {
-            qualification: row.qualification || '12th',
-            boardUniversity: row.boardUniversity || '',
-            passingYear: row.passingYear || '',
-            percentage: row.percentage || ''
-          },
-          fees: {
-            totalFees: course.feesStructure?.totalFee || 50000,
-            feesPaid: 0,
-            pendingFees: course.feesStructure?.totalFee || 50000
+          guardianDetails: {
+            fatherName: fatherName.trim() || ''
           }
         });
 
         await student.save();
-
-        // Send email (in background, don't wait)
-        setTimeout(async () => {
-          try {
-            await sendStudentCredentials({
-              studentName: `${row.firstName} ${row.lastName}`,
-              personalEmail: row.personalEmail,
-              instituteEmail: instituteEmail,
-              studentId: studentId,
-              password: password
-            });
-          } catch (emailError) {
-            console.error('Failed to send email for:', row.personalEmail, emailError);
-          }
-        }, 0);
-
         results.success++;
         results.total++;
 
       } catch (error) {
         results.failed++;
         results.total++;
-        errors.push({
-          row: rowNumber,
-          student: `${row.firstName} ${row.lastName}`,
+        results.errors.push({
+          row: i + 2,
           error: error.message
         });
       }
     }
 
     // Clean up file
-    fs.unlinkSync(filePath);
-
-    results.errors = errors;
+    fs.unlinkSync(req.file.path);
 
     res.json({
       success: true,
@@ -1969,10 +1647,9 @@ exports.bulkUploadStudents = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Bulk Upload Students Error:', error);
+    console.error('Bulk Upload Error:', error);
     
-    // Clean up file if exists
-    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+    if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
     
@@ -1988,7 +1665,7 @@ exports.bulkUploadStudents = async (req, res) => {
 exports.resetStudentPassword = async (req, res) => {
   try {
     const { id } = req.params;
-    const { newPassword, sendEmail } = req.body;
+    const { newPassword, sendEmail = false } = req.body;
 
     const student = await Student.findById(id);
     if (!student) {
@@ -1998,6 +1675,7 @@ exports.resetStudentPassword = async (req, res) => {
       });
     }
 
+    // Find user
     const user = await User.findById(student.userId);
     if (!user) {
       return res.status(404).json({
@@ -2006,10 +1684,10 @@ exports.resetStudentPassword = async (req, res) => {
       });
     }
 
-    // Generate new password if not provided
-    const password = newPassword || generateStrongPassword();
+    // Generate password if not provided
+    const password = newPassword || generateRandomPassword();
 
-    // Hash and update password
+    // Update password
     const salt = await bcrypt.genSalt(10);
     user.password = await bcrypt.hash(password, salt);
     await user.save();
@@ -2035,7 +1713,7 @@ exports.resetStudentPassword = async (req, res) => {
         studentId: student.studentId,
         instituteEmail: student.instituteEmail,
         newPassword: password,
-        emailSent: sendEmail || false
+        emailSent: sendEmail
       }
     });
 
@@ -2048,83 +1726,14 @@ exports.resetStudentPassword = async (req, res) => {
   }
 };
 
-// Helper: Generate strong password
-const generateStrongPassword = () => {
-  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-  const numbers = '0123456789';
-  const symbols = '!@#$%^&*';
-  
+// Helper: Generate random password
+const generateRandomPassword = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let password = '';
-  
-  password += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
-  password += lowercase.charAt(Math.floor(Math.random() * lowercase.length));
-  password += numbers.charAt(Math.floor(Math.random() * numbers.length));
-  password += symbols.charAt(Math.floor(Math.random() * symbols.length));
-  
-  const allChars = uppercase + lowercase + numbers + symbols;
-  for (let i = 4; i < 12; i++) {
-    password += allChars.charAt(Math.floor(Math.random() * allChars.length));
+  for (let i = 0; i < 8; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  
-  return password.split('').sort(() => 0.5 - Math.random()).join('');
-};
-
-// Helper: Send password reset email
-const sendPasswordResetEmail = async ({ studentName, personalEmail, instituteEmail, newPassword }) => {
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
-
-  const mailOptions = {
-    from: `"Nursing Institute IT Support" <${process.env.EMAIL_USER}>`,
-    to: personalEmail,
-    subject: 'Password Reset - Nursing Institute Student Portal',
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <div style="background: #ef4444; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
-          <h2 style="margin: 0;">🔐 Password Reset Notification</h2>
-        </div>
-        
-        <div style="padding: 30px; background: #f8fafc; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0;">
-          <p>Hello ${studentName},</p>
-          <p>Your password for the Nursing Institute Student Portal has been reset by the administrator.</p>
-          
-          <div style="background: white; border: 2px solid #ef4444; border-radius: 10px; padding: 20px; margin: 20px 0;">
-            <h3 style="color: #ef4444; margin-top: 0;">New Login Credentials</h3>
-            <p><strong>Institute Email:</strong> ${instituteEmail}</p>
-            <p><strong>New Password:</strong> <code style="background: #fee2e2; padding: 5px 10px; border-radius: 4px;">${newPassword}</code></p>
-          </div>
-          
-          <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
-            <h4 style="color: #d97706; margin-top: 0;">⚠️ Security Alert</h4>
-            <ul style="margin: 0; padding-left: 20px;">
-              <li>Change your password immediately after login</li>
-              <li>Do not share your password with anyone</li>
-              <li>Use a strong, unique password</li>
-              <li>Logout after each session</li>
-            </ul>
-          </div>
-          
-          <p style="text-align: center;">
-            <a href="${process.env.FRONTEND_URL}/login" style="background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
-              Login to Student Portal
-            </a>
-          </p>
-          
-          <p style="margin-top: 30px; color: #64748b; font-size: 14px;">
-            If you did not request this password reset, please contact the IT department immediately.
-          </p>
-        </div>
-      </div>
-    `
-  };
-
-  await transporter.sendMail(mailOptions);
+  return password;
 };
 
 // @desc    Export students to CSV
@@ -2132,30 +1741,21 @@ const sendPasswordResetEmail = async ({ studentName, personalEmail, instituteEma
 // @access  Private (Admin)
 exports.exportStudents = async (req, res) => {
   try {
-    const { course, academicStatus, batchYear } = req.query;
-
-    const query = {};
-    if (course) query.courseEnrolled = course;
-    if (academicStatus) query.academicStatus = academicStatus;
-    if (batchYear) query.admissionYear = parseInt(batchYear);
-
-    const students = await Student.find(query)
+    const students = await Student.find()
       .populate('courseEnrolled', 'courseName courseCode')
       .select('studentId fullName personalEmail instituteEmail mobileNumber courseEnrolled semester academicStatus admissionDate')
       .sort({ studentId: 1 });
 
-    // Create CSV content
-    let csvContent = 'Student ID,Full Name,Personal Email,Institute Email,Mobile Number,Course,Semester,Status,Admission Date\n';
+    // Create CSV
+    let csv = 'Student ID,Full Name,Personal Email,Institute Email,Mobile Number,Course,Semester,Status,Admission Date\n';
     
-    students.forEach(student => {
-      csvContent += `"${student.studentId}","${student.fullName}","${student.personalEmail}","${student.instituteEmail}","${student.mobileNumber}","${student.courseEnrolled?.courseName || 'N/A'}","${student.semester}","${student.academicStatus}","${student.admissionDate.toISOString().split('T')[0]}"\n`;
+    students.forEach(s => {
+      csv += `"${s.studentId}","${s.fullName}","${s.personalEmail}","${s.instituteEmail}","${s.mobileNumber}","${s.courseEnrolled?.courseName || ''}","${s.semester}","${s.academicStatus}","${s.admissionDate.toISOString().split('T')[0]}"\n`;
     });
 
-    // Set headers for file download
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=students_export.csv');
-    
-    res.send(csvContent);
+    res.setHeader('Content-Disposition', 'attachment; filename=students.csv');
+    res.send(csv);
 
   } catch (error) {
     console.error('Export Students Error:', error);
@@ -2167,56 +1767,28 @@ exports.exportStudents = async (req, res) => {
 };
 
 // @desc    Get student statistics
-// @route   GET /api/admin/students/stats/overview
+// @route   GET /api/admin/students/stats
 // @access  Private (Admin)
-exports.getStudentStatistics = async (req, res) => {
+exports.getStudentStats = async (req, res) => {
   try {
-    // Overall statistics
-    const overallStats = await Student.aggregate([
+    const stats = await Student.aggregate([
       {
         $group: {
           _id: null,
           total: { $sum: 1 },
-          active: {
-            $sum: { $cond: [{ $eq: ['$academicStatus', 'Active'] }, 1, 0] }
-          },
-          male: {
-            $sum: { $cond: [{ $eq: ['$gender', 'Male'] }, 1, 0] }
-          },
-          female: {
-            $sum: { $cond: [{ $eq: ['$gender', 'Female'] }, 1, 0] }
-          },
-          avgAttendance: { $avg: '$attendancePercentage' },
-          avgCGPA: { $avg: '$cgpa' }
+          active: { $sum: { $cond: [{ $eq: ['$academicStatus', 'Active'] }, 1, 0] } },
+          male: { $sum: { $cond: [{ $eq: ['$gender', 'Male'] }, 1, 0] } },
+          female: { $sum: { $cond: [{ $eq: ['$gender', 'Female'] }, 1, 0] } }
         }
       }
     ]);
 
-    // Year-wise admission trend
-    const admissionTrend = await Student.aggregate([
-      {
-        $group: {
-          _id: { $year: '$admissionDate' },
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { _id: 1 }
-      },
-      {
-        $limit: 5
-      }
-    ]);
-
-    // Course-wise statistics
-    const courseStats = await Student.aggregate([
+    // Course distribution
+    const courseDistribution = await Student.aggregate([
       {
         $group: {
           _id: '$courseEnrolled',
-          total: { $sum: 1 },
-          active: {
-            $sum: { $cond: [{ $eq: ['$academicStatus', 'Active'] }, 1, 0] }
-          }
+          count: { $sum: 1 }
         }
       },
       {
@@ -2233,19 +1805,13 @@ exports.getStudentStatistics = async (req, res) => {
       {
         $project: {
           courseName: '$course.courseName',
-          courseCode: '$course.courseCode',
-          total: 1,
-          active: 1,
-          percentage: { $multiply: [{ $divide: ['$active', '$total'] }, 100] }
+          count: 1
         }
-      },
-      {
-        $sort: { total: -1 }
       }
     ]);
 
-    // Semester-wise distribution
-    const semesterStats = await Student.aggregate([
+    // Semester distribution
+    const semesterDistribution = await Student.aggregate([
       {
         $match: { academicStatus: 'Active' }
       },
@@ -2260,55 +1826,61 @@ exports.getStudentStatistics = async (req, res) => {
       }
     ]);
 
-    // Hostel statistics
-    const hostelStats = await Student.aggregate([
-      {
-        $group: {
-          _id: '$hostelAllotted',
-          count: { $sum: 1 },
-          male: {
-            $sum: { $cond: [{ $eq: ['$gender', 'Male'] }, 1, 0] }
-          },
-          female: {
-            $sum: { $cond: [{ $eq: ['$gender', 'Female'] }, 1, 0] }
-          }
-        }
-      }
-    ]);
-
     res.json({
       success: true,
       data: {
-        overall: overallStats[0] || {
-          total: 0,
-          active: 0,
-          male: 0,
-          female: 0,
-          avgAttendance: 0,
-          avgCGPA: 0
-        },
-        trends: {
-          admission: admissionTrend,
-          semester: semesterStats
-        },
-        courses: courseStats,
-        facilities: {
-          hostel: hostelStats,
-          transport: await Student.countDocuments({ transportFacility: true })
-        },
-        fees: await getFeesStatistics()
+        overall: stats[0] || { total: 0, active: 0, male: 0, female: 0 },
+        courses: courseDistribution,
+        semesters: semesterDistribution
       }
     });
 
   } catch (error) {
-    console.error('Get Student Statistics Error:', error);
+    console.error('Get Student Stats Error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch student statistics'
     });
   }
 };
+// @desc    Search students
+// @route   GET /api/admin/students/search
+// @access  Private (Admin)
+exports.searchStudents = async (req, res) => {
+  try {
+    const { q } = req.query;
 
+    if (!q || q.length < 2) {
+      return res.status(400).json({
+        success: false,
+        message: 'Search query must be at least 2 characters'
+      });
+    }
+
+    const students = await Student.find({
+      $or: [
+        { studentId: { $regex: q, $options: 'i' } },
+        { fullName: { $regex: q, $options: 'i' } },
+        { personalEmail: { $regex: q, $options: 'i' } },
+        { mobileNumber: { $regex: q, $options: 'i' } }
+      ]
+    })
+    .limit(10)
+    .select('studentId fullName personalEmail courseEnrolled semester academicStatus');
+
+    res.json({
+      success: true,
+      data: students
+    });
+
+  } catch (error) {
+    console.error('Search Students Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to search students'
+    });
+  }
+};
 // Helper: Get fees statistics
 const getFeesStatistics = async () => {
   const result = await Student.aggregate([
