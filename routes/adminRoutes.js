@@ -47,7 +47,7 @@ router.post('/attendance', adminController.manageAttendance);
 // Marks Management
 router.post('/marks', adminController.manageMarks);
 router.put('/marks/publish', adminController.publishMarks);
-
+ 
 // Content Management
 router.post('/downloads', upload.single('file'), adminController.uploadStudyMaterial);
 router.get('/downloads', adminController.getAllDownloads);

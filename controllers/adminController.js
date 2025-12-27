@@ -728,6 +728,35 @@ exports.deleteNews = async (req, res) => {
     });
   }
 };
+// @desc    Generate unique student ID
+// @param   batchYear, courseCode
+const generateStudentId = async (batchYear, courseCode) => {
+  try {
+    // Format: COURSE-BATCHYEAR-001 (e.g., GNM-2024-001)
+    const prefix = `${courseCode}-${batchYear}`;
+    
+    // Find the last student ID with this prefix
+    const lastStudent = await Student.findOne({
+      studentId: new RegExp(`^${prefix}`)
+    }).sort({ studentId: -1 });
+    
+    let sequence = 1;
+    if (lastStudent && lastStudent.studentId) {
+      const lastSeq = parseInt(lastStudent.studentId.split('-')[2]);
+      if (!isNaN(lastSeq)) {
+        sequence = lastSeq + 1;
+      }
+    }
+    
+    // Format sequence with leading zeros (001, 002, etc.)
+    const sequenceStr = sequence.toString().padStart(3, '0');
+    return `${prefix}-${sequenceStr}`;
+  } catch (error) {
+    console.error('Generate Student ID Error:', error);
+    // Fallback: timestamp-based ID
+    return `${courseCode}-${batchYear}-${Date.now().toString().slice(-3)}`;
+  }
+};
 
 // @desc    Add new student
 // @route   POST /api/admin/students
