@@ -41,9 +41,25 @@ router.post('/students/create-missing-users', adminController.createUsersForMiss
 // Reset user password by user id
 router.post('/users/:id/reset-password', adminController.resetUserPassword);
 
-// Attendance Management
-router.post('/attendance', adminController.manageAttendance);
+// Faculty Management
+router.post('/faculty', adminController.addFaculty);
+router.get('/faculty', adminController.getAllFaculty);
+router.get('/faculty/:id', adminController.getFacultyById);
+router.put('/faculty/:id', adminController.updateFaculty);
+router.delete('/faculty/:id', adminController.deleteFaculty);
 
+// Attendance Management
+router.post('/attendance', adminController.markAttendance);
+router.get('/attendance', adminController.getAttendance);
+router.get('/attendance/report', adminController.generateAttendanceReport);
+router.post('/attendance/bulk', upload.single('file'), adminController.bulkUploadAttendance);
+
+// Settings Management
+router.get('/settings', adminController.getSettings);
+router.put('/settings', adminController.updateSettings);
+router.post('/settings/reset', adminController.resetSettings);
+router.post('/clear-cache', adminController.clearCache);
+router.get('/system-check', adminController.systemCheck);
 // Marks Management
 router.post('/marks', adminController.manageMarks);
 router.put('/marks/publish', adminController.publishMarks);

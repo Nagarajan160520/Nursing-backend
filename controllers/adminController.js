@@ -757,216 +757,483 @@ const generateStudentId = async (batchYear, courseCode) => {
     return `${courseCode}-${batchYear}-${Date.now().toString().slice(-3)}`;
   }
 };
+// Update the Student ID generation logic in addStudent function:
 
-// @desc    Add new student
-// @route   POST /api/admin/students
-// @access  Private (Admin)
-// @desc    Add new student with auto-generated ID
-// @route   POST /api/admin/students
-// @access  Private (Admin)
 exports.addStudent = async (req, res) => {
-    try {
-        const { 
-            fullName, 
-            email, 
-            dateOfBirth, 
-            gender, 
-            contactNumber, 
-            courseEnrolled, 
-            batchYear, 
-            semester,
-            guardianName,
-            guardianContact,
-            address
-        } = req.body;
+  try {
+    const {
+      firstName,
+      lastName,
+      personalEmail,
+      mobileNumber,
+      courseEnrolled,
+      dateOfBirth,
+      gender,
+      bloodGroup,
+      fatherName,
+      fatherMobile,
+      motherName,
+      motherMobile,
+      permanentAddress,
+      correspondenceAddress,
+      admissionType,
+      admissionQuota,
+      semester,
+      rollNumber,
+      qualification,
+      boardUniversity,
+      passingYear,
+      percentage,
+      schoolCollege,
+      requireHostel,
+      requireTransport,
+      hostelType,
+      transportRoute,
+      documents
+    } = req.body;
 
-        // Validate required fields
-        if (!fullName || !email || !courseEnrolled) {
-            return res.status(400).json({
-                success: false,
-                message: 'Required fields: fullName, email, courseEnrolled'
-            });
-        }
-
-        // Validate email format
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Please provide a valid email address'
-            });
-        }
-
-        // Check if user already exists with this email
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-            return res.status(400).json({
-                success: false,
-                message: 'An account with this email already exists'
-            });
-        }
-
-        // Get course details
-        const course = await Course.findById(courseEnrolled);
-        if (!course) {
-            return res.status(400).json({
-                success: false,
-                message: 'Selected course not found'
-            });
-        }
-
-        // Generate auto Student ID: INST/YEAR/SEQUENCE
-        const currentYear = batchYear || new Date().getFullYear();
-        const yearCode = currentYear.toString().slice(-2);
-        const courseCode = course.courseCode.substring(0, 3).toUpperCase();
-        
-        // Find last student ID for this course and year
-        const lastStudent = await Student.findOne({
-            studentId: new RegExp(`^INST/${yearCode}/${courseCode}`)
-        }).sort({ createdAt: -1 });
-
-        let sequence = 1;
-        if (lastStudent && lastStudent.studentId) {
-            const lastSequence = parseInt(lastStudent.studentId.split('/').pop());
-            sequence = lastSequence + 1;
-        }
-
-        // Format sequence as 3-digit number
-        const sequenceStr = sequence.toString().padStart(3, '0');
-        const studentId = `INST/${yearCode}/${courseCode}${sequenceStr}`;
-
-        // Create user account WITHOUT password initially
-        const user = new User({
-            username: studentId, // Use auto-generated student ID as username
-            email: email, // Student's personal email
-            password: 'PENDING_FIRST_LOGIN', // Temporary placeholder
-            role: 'student',
-            isActive: true
-        });
-
-        await user.save();
-
-        // Generate temporary login token for first login
-        const crypto = require('crypto');
-        const firstLoginToken = crypto.randomBytes(32).toString('hex');
-        const tokenExpiry = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
-
-        // Save token to user
-        user.resetPasswordToken = crypto
-            .createHash('sha256')
-            .update(firstLoginToken)
-            .digest('hex');
-        user.resetPasswordExpire = tokenExpiry;
-        await user.save();
-
-        // Create student profile
-        const student = new Student({
-            userId: user._id,
-            studentId: studentId,
-            fullName,
-            email,
-            dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-            gender: gender || 'Other',
-            contactNumber: contactNumber || '',
-            guardianDetails: {
-                name: guardianName || '',
-                contact: guardianContact || ''
-            },
-            address: address || {
-                street: '',
-                city: '',
-                state: '',
-                pincode: ''
-            },
-            courseEnrolled,
-            batchYear: currentYear,
-            semester: semester || 1,
-            academicStatus: 'Active',
-            admissionDate: new Date(),
-            firstLoginRequired: true
-        });
-
-        await student.save();
-
-        // Send welcome email with first login instructions
-        const firstLoginLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/first-login/${firstLoginToken}`;
-        
-        const emailContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <style>
-                body { font-family: Arial, sans-serif; line-height: 1.6; }
-                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                .header { background: #3498db; color: white; padding: 20px; text-align: center; }
-                .content { padding: 20px; background: #f9f9f9; }
-                .button { display: inline-block; padding: 12px 24px; background: #2ecc71; color: white; text-decoration: none; border-radius: 5px; }
-                .credentials { background: white; padding: 15px; border-left: 4px solid #3498db; margin: 15px 0; }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h2>Welcome to ${process.env.INSTITUTE_NAME || 'Nursing Institute'}</h2>
-                </div>
-                <div class="content">
-                    <h3>Dear ${fullName},</h3>
-                    <p>Your student account has been successfully created.</p>
-                    
-                    <div class="credentials">
-                        <p><strong>Student ID:</strong> ${studentId}</p>
-                        <p><strong>Email:</strong> ${email}</p>
-                        <p><strong>Course:</strong> ${course.courseName}</p>
-                        <p><strong>Batch:</strong> ${currentYear}</p>
-                    </div>
-                    
-                    <p>To complete your registration and set your password, please click the button below:</p>
-                    
-                    <p style="text-align: center; margin: 30px 0;">
-                        <a href="${firstLoginLink}" class="button">Set Your Password</a>
-                    </p>
-                    
-                    <p><strong>Important Notes:</strong></p>
-                    <ul>
-                        <li>This link will expire in 7 days</li>
-                        <li>Use your personal email (${email}) to login after setting password</li>
-                        <li>Contact admin if you face any issues</li>
-                    </ul>
-                    
-                    <p>Best regards,<br>
-                    ${process.env.INSTITUTE_NAME || 'Nursing Institute'} Administration</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        `;
-
-        // Send email (using your email service)
-        await sendEmail({
-            email: email,
-            subject: `Welcome to ${process.env.INSTITUTE_NAME || 'Nursing Institute'} - Set Your Password`,
-            html: emailContent
-        });
-
-        res.status(201).json({
-            success: true,
-            message: 'Student added successfully. Login instructions sent to student\'s email.',
-            data: {
-                studentId: studentId,
-                email: email,
-                course: course.courseName,
-                firstLoginLink: firstLoginLink, // For admin reference
-                note: 'Student will receive email with password setup link'
-            }
-        });
-
-    } catch (error) {
-        console.error('Add Student Error:', error);
-        res.status(500).json({
-            success: false,
-            message: error.message || 'Failed to add student'
-        });
+    // ✅ 1. VALIDATE REQUIRED FIELDS
+    if (!firstName || !lastName || !personalEmail || !mobileNumber || !courseEnrolled) {
+      return res.status(400).json({
+        success: false,
+        message: 'Required fields: firstName, lastName, personalEmail, mobileNumber, courseEnrolled'
+      });
     }
+
+    // ✅ 2. VALIDATE EMAIL FORMAT
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(personalEmail)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a valid email address'
+      });
+    }
+
+    // ✅ 3. CHECK IF PERSONAL EMAIL ALREADY EXISTS
+    const existingStudentWithEmail = await Student.findOne({ 
+      $or: [
+        { personalEmail: personalEmail },
+        { email: personalEmail }
+      ]
+    });
+    
+    if (existingStudentWithEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Student with this email already exists'
+      });
+    }
+
+    // ✅ 4. GET COURSE DETAILS
+    const course = await Course.findById(courseEnrolled);
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+    }
+
+    // ✅ 5. GENERATE UNIQUE STUDENT ID (FIXED LOGIC)
+    const generateUniqueStudentId = async (courseCode) => {
+      const year = new Date().getFullYear();
+      const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+      
+      // Try multiple attempts to get unique ID
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        // Get count of students in this course for current month
+        const startOfMonth = new Date(year, new Date().getMonth(), 1);
+        const endOfMonth = new Date(year, new Date().getMonth() + 1, 0);
+        
+        const monthlyCount = await Student.countDocuments({
+          courseEnrolled,
+          admissionDate: {
+            $gte: startOfMonth,
+            $lte: endOfMonth
+          }
+        });
+        
+        const sequence = (monthlyCount + attempt).toString().padStart(3, '0');
+        const studentId = `${courseCode}${year}${month}${sequence}`;
+        
+        // Check if this ID already exists
+        const existingStudent = await Student.findOne({ studentId });
+        if (!existingStudent) {
+          return studentId;
+        }
+      }
+      
+      // If all attempts fail, generate with timestamp
+      return `${courseCode}${year}${month}${Date.now().toString().slice(-3)}`;
+    };
+
+    const studentId = await generateUniqueStudentId(course.courseCode);
+
+    // ✅ 6. GENERATE UNIQUE INSTITUTE EMAIL (FIXED LOGIC)
+    const generateUniqueInstituteEmail = async (firstName, lastName, studentId) => {
+      const cleanFirstName = firstName.toLowerCase().replace(/[^a-z]/g, '');
+      const cleanLastName = lastName.toLowerCase().replace(/[^a-z]/g, '');
+      const randomSuffix = Math.floor(100 + Math.random() * 900); // 100-999
+      
+      // Try multiple email formats
+      const emailFormats = [
+        `${cleanFirstName}.${cleanLastName}.${studentId.substring(studentId.length - 3)}@nursinginstitute.edu`,
+        `${cleanFirstName}.${cleanLastName}.${randomSuffix}@nursinginstitute.edu`,
+        `${cleanFirstName[0]}${cleanLastName}.${studentId.substring(studentId.length - 4)}@nursinginstitute.edu`,
+        `student.${studentId}@nursinginstitute.edu`
+      ];
+      
+      for (const emailFormat of emailFormats) {
+        const existingUser = await User.findOne({ email: emailFormat });
+        if (!existingUser) {
+          return emailFormat;
+        }
+      }
+      
+      // If all formats exist, use timestamp
+      return `student.${studentId}.${Date.now().toString().slice(-6)}@nursinginstitute.edu`;
+    };
+
+    const instituteEmail = await generateUniqueInstituteEmail(firstName, lastName, studentId);
+
+    // ✅ 7. CHECK IF INSTITUTE EMAIL EXISTS (DOUBLE CHECK)
+    const existingUser = await User.findOne({ email: instituteEmail });
+    if (existingUser) {
+      // Generate new one with timestamp
+      instituteEmail = `student.${studentId}.${Date.now().toString().slice(-6)}@nursinginstitute.edu`;
+    }
+
+    // ✅ 8. GENERATE STRONG PASSWORD
+    const generateStrongPassword = () => {
+      const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+      const numbers = '0123456789';
+      const symbols = '!@#$%';
+      
+      let password = '';
+      
+      // Ensure at least one of each type
+      password += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+      password += lowercase.charAt(Math.floor(Math.random() * lowercase.length));
+      password += numbers.charAt(Math.floor(Math.random() * numbers.length));
+      password += symbols.charAt(Math.floor(Math.random() * symbols.length));
+      
+      // Fill remaining 4 characters
+      const allChars = uppercase + lowercase + numbers + symbols;
+      for (let i = 0; i < 4; i++) {
+        password += allChars.charAt(Math.floor(Math.random() * allChars.length));
+      }
+      
+      // Shuffle the password
+      return password.split('').sort(() => 0.5 - Math.random()).join('');
+    };
+    
+    const password = generateStrongPassword();
+
+    // ✅ 9. HASH PASSWORD
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    // ✅ 10. CREATE USER ACCOUNT
+    const user = new User({
+      username: studentId,
+      email: instituteEmail,
+      password: hashedPassword,
+      role: 'student',
+      isActive: true,
+      lastLogin: null
+    });
+
+    await user.save();
+
+    // ✅ 11. PROCESS DOCUMENTS CORRECTLY
+    const processDocuments = (docsObj) => {
+      if (!docsObj || typeof docsObj !== 'object') return [];
+      
+      const documentMap = {
+        'aadhar': 'Aadhar',
+        'tc': 'TC',
+        'marksheet': 'MarkSheet',
+        'photo': 'Photo',
+        'medical': 'Medical',
+        'caste': 'Caste',
+        'income': 'Income',
+        'other': 'Other'
+      };
+      
+      const processedDocs = [];
+      
+      Object.entries(docsObj).forEach(([key, value]) => {
+        const docType = documentMap[key.toLowerCase()];
+        if (value === true && docType) {
+          processedDocs.push({
+            documentType: docType,
+            documentName: `${docType} Certificate`,
+            documentUrl: '',
+            uploadedAt: null,
+            verified: false
+          });
+        }
+      });
+      
+      return processedDocs;
+    };
+
+    // ✅ 12. CREATE STUDENT PROFILE
+    const student = new Student({
+      userId: user._id,
+      studentId: studentId,
+      firstName: firstName,
+      lastName: lastName,
+      fullName: `${firstName} ${lastName}`,
+      
+      // Required fields by model
+      email: personalEmail,
+      personalEmail: personalEmail,
+      instituteEmail: instituteEmail,
+      
+      contactNumber: mobileNumber,
+      mobileNumber: mobileNumber,
+      
+      batchYear: req.body.batchYear || new Date().getFullYear(),
+      
+      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+      gender: gender || 'Other',
+      bloodGroup: bloodGroup || '',
+      
+      // Address
+      address: {
+        street: permanentAddress?.addressLine1 || '',
+        city: permanentAddress?.city || '',
+        state: permanentAddress?.state || '',
+        pincode: permanentAddress?.pincode || '',
+        country: permanentAddress?.country || 'India'
+      },
+      
+      correspondenceAddress: correspondenceAddress?.sameAsPermanent ? null : {
+        street: correspondenceAddress?.addressLine1 || '',
+        city: correspondenceAddress?.city || '',
+        state: correspondenceAddress?.state || '',
+        pincode: correspondenceAddress?.pincode || ''
+      },
+      
+      // Guardian Details
+      guardianDetails: {
+        fatherName: fatherName || '',
+        fatherOccupation: req.body.fatherOccupation || '',
+        fatherContact: fatherMobile || '',
+        motherName: motherName || '',
+        motherOccupation: req.body.motherOccupation || '',
+        motherContact: motherMobile || '',
+        guardianName: req.body.guardianName || '',
+        guardianRelation: req.body.guardianRelation || '',
+        guardianContact: req.body.guardianMobile || ''
+      },
+      
+      // Academic Details
+      courseEnrolled: courseEnrolled,
+      admissionYear: new Date().getFullYear(),
+      admissionType: admissionType || 'Regular',
+      admissionQuota: admissionQuota || 'General',
+      semester: parseInt(semester) || 1,
+      rollNumber: rollNumber || '',
+      admissionDate: new Date(),
+      
+      // Previous Education
+      previousEducation: {
+        qualification: qualification || '12th',
+        boardUniversity: boardUniversity || '',
+        passingYear: passingYear || '',
+        percentage: percentage || '',
+        schoolCollege: schoolCollege || ''
+      },
+      
+      // Facilities
+      hostelAllotted: requireHostel || false,
+      hostelDetails: requireHostel ? {
+        hostelName: `${hostelType} Hostel`,
+        roomNumber: 'To be allocated',
+        fees: hostelType === 'Boys' ? 50000 : 55000
+      } : null,
+      
+      transportFacility: requireTransport || false,
+      transportDetails: requireTransport ? {
+        routeNumber: transportRoute || 'Route 1',
+        pickupPoint: 'To be assigned',
+        fees: 15000
+      } : null,
+      
+      // Documents
+      documents: processDocuments(documents),
+      
+      // Status
+      academicStatus: 'Active',
+      attendancePercentage: 0,
+      cgpa: 0,
+      
+      // Fees
+      fees: {
+        totalFees: course.feesStructure?.totalFee || 50000,
+        feesPaid: 0,
+        pendingFees: course.feesStructure?.totalFee || 50000,
+        lastPaymentDate: null
+      },
+      
+      // Payment History
+      paymentHistory: []
+    });
+
+    await student.save();
+
+    // ✅ 13. SEND EMAIL
+    try {
+      await sendStudentCredentials({
+        studentName: `${firstName} ${lastName}`,
+        personalEmail: personalEmail,
+        instituteEmail: instituteEmail,
+        studentId: studentId,
+        password: password
+      });
+    } catch (emailError) {
+      console.error('Email sending failed:', emailError);
+      // Continue even if email fails
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Student added successfully',
+      data: {
+        student: {
+          _id: student._id,
+          studentId: studentId,
+          fullName: `${firstName} ${lastName}`,
+          personalEmail: personalEmail,
+          instituteEmail: instituteEmail,
+          course: course.courseName,
+          batchYear: student.batchYear
+        },
+        credentials: {
+          studentId: studentId,
+          instituteEmail: instituteEmail,
+          password: password,
+          note: 'Please change password on first login'
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Add Student Error:', error);
+    
+    // Clean up if student creation failed
+    if (req.body.studentId) {
+      await User.findOneAndDelete({ username: req.body.studentId });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to add student',
+      validationErrors: error.errors ? Object.keys(error.errors) : [],
+      errorDetails: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+// Helper: Send student credentials email
+const sendStudentCredentials = async ({ studentName, personalEmail, instituteEmail, studentId, password }) => {
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+
+  const mailOptions = {
+    from: `"Nursing Institute" <${process.env.EMAIL_USER}>`,
+    to: personalEmail,
+    cc: process.env.ADMIN_EMAIL,
+    subject: 'Welcome to Nursing Institute - Your Login Credentials',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: linear-gradient(to right, #1e40af, #3b82f6); color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h1 style="margin: 0;">🎓 Nursing Institute</h1>
+          <p style="margin: 5px 0 0 0; font-size: 18px;">Excellence in Healthcare Education</p>
+        </div>
+        
+        <div style="padding: 30px; background: #f8fafc; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0;">
+          <h2 style="color: #1e40af;">Welcome ${studentName}!</h2>
+          <p>Your admission to Nursing Institute has been processed successfully. We are pleased to welcome you to our institute.</p>
+          
+          <div style="background: white; border: 2px solid #3b82f6; border-radius: 10px; padding: 20px; margin: 20px 0;">
+            <h3 style="color: #1e40af; margin-top: 0;">Your Login Credentials</h3>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>Student ID:</strong></td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #1e40af;">${studentId}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>Institute Email:</strong></td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #1e40af;">${instituteEmail}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0;"><strong>Password:</strong></td>
+                <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; color: #ef4444;">${password}</td>
+              </tr>
+              <tr>
+                <td style="padding: 10px;"><strong>Login URL:</strong></td>
+                <td style="padding: 10px;">
+                  <a href="${process.env.FRONTEND_URL}/login" style="color: #3b82f6; text-decoration: none;">
+                    ${process.env.FRONTEND_URL}/login
+                  </a>
+                </td>
+              </tr>
+            </table>
+          </div>
+          
+          <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+            <h4 style="color: #d97706; margin-top: 0;">⚠️ Important Instructions</h4>
+            <ol style="margin: 0; padding-left: 20px;">
+              <li><strong>Change your password immediately</strong> after first login</li>
+              <li>Use your <strong>Institute Email</strong> for all academic communications</li>
+              <li>Check your institute email regularly for updates</li>
+              <li>Your Student ID must be mentioned in all communications</li>
+            </ol>
+          </div>
+          
+          <div style="background: #ecfdf5; border-left: 4px solid #10b981; padding: 15px; margin: 20px 0;">
+            <h4 style="color: #059669; margin-top: 0;">📅 Next Steps</h4>
+            <ul style="margin: 0; padding-left: 20px;">
+              <li>Complete your profile in the Student Portal</li>
+              <li>Upload required documents within 7 days</li>
+              <li>Check the academic calendar for important dates</li>
+              <li>Join the orientation program (Date will be announced)</li>
+            </ul>
+          </div>
+          
+          <p style="text-align: center; margin-top: 30px;">
+            <a href="${process.env.FRONTEND_URL}/login" style="background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+              Go to Student Portal
+            </a>
+          </p>
+          
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 30px 0;">
+          
+          <div style="text-align: center; color: #64748b; font-size: 14px;">
+            <p>For any queries, contact:</p>
+            <p>
+              📞 Admission Office: +91 9876543210<br>
+              📧 Email: admissions@nursinginstitute.edu<br>
+              🏢 Address: Nursing Institute Campus, Education City, State - 600001
+            </p>
+            <p style="margin-top: 20px;">
+              <em>This is an automated email. Please do not reply.</em>
+            </p>
+          </div>
+        </div>
+      </div>
+    `
+  };
+
+  await transporter.sendMail(mailOptions);
 };
 
 // @desc    Handle student's first login/password setup
@@ -1047,55 +1314,122 @@ exports.firstLoginSetup = async (req, res) => {
     }
 };
 
-// @desc    Get all students
+// @desc    Get all students with filters
 // @route   GET /api/admin/students
 // @access  Private (Admin)
 exports.getAllStudents = async (req, res) => {
   try {
-    const { course, semester, status, search } = req.query;
-    
+    const { 
+      search, 
+      course, 
+      semester, 
+      academicStatus, 
+      batchYear,
+      page = 1,
+      limit = 10
+    } = req.query;
+
     const query = {};
-    
-    if (course) {
-      query.courseEnrolled = course;
-    }
-    
-    if (semester) {
-      query.semester = parseInt(semester);
-    }
-    
-    if (status) {
-      query.academicStatus = status;
-    }
-    
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Search filter
     if (search) {
       query.$or = [
         { studentId: { $regex: search, $options: 'i' } },
         { fullName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } }
+        { personalEmail: { $regex: search, $options: 'i' } },
+        { instituteEmail: { $regex: search, $options: 'i' } },
+        { mobileNumber: { $regex: search, $options: 'i' } }
       ];
     }
 
+    // Course filter
+    if (course && mongoose.Types.ObjectId.isValid(course)) {
+      query.courseEnrolled = course;
+    }
+
+    // Semester filter
+    if (semester) {
+      query.semester = parseInt(semester);
+    }
+
+    // Status filter
+    if (academicStatus) {
+      query.academicStatus = academicStatus;
+    }
+
+    // Batch year filter
+    if (batchYear) {
+      query.admissionYear = parseInt(batchYear);
+    }
+
+    // Get students with pagination
     const students = await Student.find(query)
-      .populate('courseEnrolled', 'courseName')
-      .sort({ createdAt: -1 });
+      .populate('courseEnrolled', 'courseName courseCode duration')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit))
+      .select('-__v -userId');
+
+    // Get total count for pagination
+    const total = await Student.countDocuments(query);
 
     // Get statistics
-    const totalStudents = await Student.countDocuments();
-    const activeStudents = await Student.countDocuments({ academicStatus: 'Active' });
-    const completedStudents = await Student.countDocuments({ academicStatus: 'Completed' });
+    const stats = {
+      total: await Student.countDocuments(),
+      active: await Student.countDocuments({ academicStatus: 'Active' }),
+      completed: await Student.countDocuments({ academicStatus: 'Completed' }),
+      onLeave: await Student.countDocuments({ academicStatus: 'On Leave' }),
+      discontinued: await Student.countDocuments({ academicStatus: 'Discontinued' })
+    };
+
+    // Course-wise distribution
+    const courseWise = await Student.aggregate([
+      {
+        $group: {
+          _id: '$courseEnrolled',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $lookup: {
+          from: 'courses',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'course'
+        }
+      },
+      {
+        $unwind: '$course'
+      },
+      {
+        $project: {
+          courseName: '$course.courseName',
+          courseCode: '$course.courseCode',
+          count: 1
+        }
+      }
+    ]);
 
     res.json({
       success: true,
       data: {
         students,
-        stats: {
-          total: totalStudents,
-          active: activeStudents,
-          completed: completedStudents
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        },
+        stats,
+        distribution: {
+          courses: courseWise,
+          semesterWise: await getSemesterWiseDistribution(),
+          statusWise: await getStatusWiseDistribution()
         }
       }
     });
+
   } catch (error) {
     console.error('Get All Students Error:', error);
     res.status(500).json({
@@ -1104,6 +1438,155 @@ exports.getAllStudents = async (req, res) => {
     });
   }
 };
+
+// Helper: Get semester-wise distribution
+const getSemesterWiseDistribution = async () => {
+  return await Student.aggregate([
+    {
+      $match: { academicStatus: 'Active' }
+    },
+    {
+      $group: {
+        _id: '$semester',
+        count: { $sum: 1 }
+      }
+    },
+    {
+      $sort: { _id: 1 }
+    }
+  ]);
+};
+
+// Helper: Get status-wise distribution
+const getStatusWiseDistribution = async () => {
+  return await Student.aggregate([
+    {
+      $group: {
+        _id: '$academicStatus',
+        count: { $sum: 1 }
+      }
+    }
+  ]);
+};
+// @desc    Get student by ID
+// @route   GET /api/admin/students/:id
+// @access  Private (Admin)
+exports.getStudentById = async (req, res) => {
+  try {
+    const student = await Student.findById(req.params.id)
+      .populate('courseEnrolled')
+      .populate('userId', 'username email isActive lastLogin')
+      .select('-__v');
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    // Get attendance summary
+    const attendanceSummary = await Attendance.aggregate([
+      {
+        $match: { 
+          student: student._id,
+          isHoliday: false 
+        }
+      },
+      {
+        $group: {
+          _id: '$subject',
+          total: { $sum: 1 },
+          present: {
+            $sum: {
+              $cond: [{ $in: ['$status', ['Present', 'Late']] }, 1, 0]
+            }
+          }
+        }
+      }
+    ]);
+
+    // Get marks summary
+    const marksSummary = await Marks.find({ student: student._id })
+      .sort({ semester: 1, examDate: -1 })
+      .select('subject semester examType marks.obtained percentage grade resultStatus')
+      .limit(10);
+
+    // Calculate GPA
+    const gpa = await calculateGPA(student._id);
+
+    // Get fees status
+    const feesStatus = {
+      totalFees: student.fees?.totalFees || 0,
+      paid: student.fees?.feesPaid || 0,
+      pending: student.fees?.pendingFees || 0,
+      lastPayment: student.fees?.lastPaymentDate,
+      paymentHistory: student.paymentHistory || []
+    };
+
+    // Get documents status
+    const documentsStatus = student.documents?.map(doc => ({
+      type: doc.documentType,
+      name: doc.documentName,
+      uploaded: !!doc.documentUrl,
+      verified: doc.verified,
+      uploadedAt: doc.uploadedAt
+    })) || [];
+
+    res.json({
+      success: true,
+      data: {
+        student,
+        academic: {
+          attendance: {
+            summary: attendanceSummary,
+            percentage: student.attendancePercentage || 0
+          },
+          marks: marksSummary,
+          gpa: gpa.toFixed(2)
+        },
+        fees: feesStatus,
+        documents: documentsStatus,
+        hostel: student.hostelDetails,
+        transport: student.transportDetails
+      }
+    });
+
+  } catch (error) {
+    console.error('Get Student By ID Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student details'
+    });
+  }
+};
+
+// Helper: Calculate GPA
+const calculateGPA = async (studentId) => {
+  const marks = await Marks.find({ 
+    student: studentId,
+    resultStatus: 'Pass'
+  });
+
+  if (marks.length === 0) return 0;
+
+  const gradePoints = {
+    'O': 10, 'A+': 9, 'A': 8, 'B+': 7, 'B': 6, 'C': 5, 'D': 4, 'F': 0
+  };
+
+  let totalPoints = 0;
+  let totalCredits = 0;
+
+  marks.forEach(mark => {
+    const points = gradePoints[mark.grade] || 0;
+    const credits = 4; // Assuming each subject has 4 credits
+    totalPoints += points * credits;
+    totalCredits += credits;
+  });
+
+  return totalCredits > 0 ? totalPoints / totalCredits : 0;
+};
+
 
 // @desc    Get student details
 // @route   GET /api/admin/students/:id
@@ -1192,28 +1675,57 @@ exports.updateStudent = async (req, res) => {
       });
     }
 
-    // Update student data
+    // Fields that can be updated
+    const allowedUpdates = [
+      'firstName', 'lastName', 'fullName',
+      'mobileNumber', 'alternateContact', 'whatsappNumber',
+      'dateOfBirth', 'gender', 'bloodGroup',
+      'address', 'correspondenceAddress',
+      'guardianDetails',
+      'courseEnrolled', 'semester', 'rollNumber',
+      'academicStatus',
+      'hostelAllotted', 'hostelDetails',
+      'transportFacility', 'transportDetails',
+      'documents',
+      'fees'
+    ];
+
+    // Apply updates
     Object.keys(updates).forEach(key => {
-      if (key !== 'userId' && key !== '_id') {
-        student[key] = updates[key];
+      if (allowedUpdates.includes(key)) {
+        if (key === 'documents' && Array.isArray(updates[key])) {
+          student[key] = updates[key];
+        } else if (typeof updates[key] === 'object' && updates[key] !== null) {
+          student[key] = { ...student[key], ...updates[key] };
+        } else {
+          student[key] = updates[key];
+        }
       }
     });
 
-    await student.save();
-
-    // Update user account if needed
-    if (updates.email) {
-      await User.findByIdAndUpdate(student.userId, {
-        email: updates.email,
-        username: updates.studentId || student.studentId
-      });
+    // Update full name if first/last name changed
+    if (updates.firstName || updates.lastName) {
+      student.fullName = `${updates.firstName || student.firstName} ${updates.lastName || student.lastName}`;
     }
+
+    // Update user email if institute email changed
+    if (updates.instituteEmail && updates.instituteEmail !== student.instituteEmail) {
+      const user = await User.findById(student.userId);
+      if (user) {
+        user.email = updates.instituteEmail;
+        await user.save();
+        student.instituteEmail = updates.instituteEmail;
+      }
+    }
+
+    await student.save();
 
     res.json({
       success: true,
       message: 'Student updated successfully',
       data: student
     });
+
   } catch (error) {
     console.error('Update Student Error:', error);
     res.status(500).json({
@@ -1238,6 +1750,14 @@ exports.deleteStudent = async (req, res) => {
       });
     }
 
+    // Check if student can be deleted
+    if (student.academicStatus === 'Active') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete active student. Change status first.'
+      });
+    }
+
     // Delete user account
     await User.findByIdAndDelete(student.userId);
 
@@ -1254,6 +1774,7 @@ exports.deleteStudent = async (req, res) => {
       success: true,
       message: 'Student deleted successfully'
     });
+
   } catch (error) {
     console.error('Delete Student Error:', error);
     res.status(500).json({
@@ -1263,7 +1784,7 @@ exports.deleteStudent = async (req, res) => {
   }
 };
 
-// @desc    Bulk upload students
+// @desc    Bulk upload students from CSV
 // @route   POST /api/admin/students/bulk-upload
 // @access  Private (Admin)
 exports.bulkUploadStudents = async (req, res) => {
@@ -1271,14 +1792,11 @@ exports.bulkUploadStudents = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: 'Please upload a CSV/Excel file'
+        message: 'Please upload a CSV file'
       });
     }
 
-    // Parse CSV/Excel file
-    // This is a placeholder - you'll need to implement CSV/Excel parsing
-    // using libraries like csv-parser, xlsx, etc.
-
+    const filePath = req.file.path;
     const results = {
       total: 0,
       success: 0,
@@ -1286,25 +1804,535 @@ exports.bulkUploadStudents = async (req, res) => {
       errors: []
     };
 
-    // TODO: Implement CSV parsing and student creation
-    // For each row in CSV:
-    // 1. Validate data
-    // 2. Check for duplicates
-    // 3. Create user and student
-    // 4. Track success/failure
+    const studentsData = [];
+    const errors = [];
+
+    // Read CSV file
+    const readCSV = () => {
+      return new Promise((resolve, reject) => {
+        fs.createReadStream(filePath)
+          .pipe(csv())
+          .on('data', (row) => {
+            studentsData.push(row);
+          })
+          .on('end', () => {
+            resolve();
+          })
+          .on('error', (error) => {
+            reject(error);
+          });
+      });
+    };
+
+    await readCSV();
+
+    // Process each row
+    for (let i = 0; i < studentsData.length; i++) {
+      const row = studentsData[i];
+      const rowNumber = i + 2; // +2 because header is row 1
+
+      try {
+        // Validate required fields
+        if (!row.firstName || !row.lastName || !row.personalEmail || !row.mobileNumber || !row.courseCode) {
+          throw new Error('Missing required fields');
+        }
+
+        // Validate email
+        if (!row.personalEmail.includes('@')) {
+          throw new Error('Invalid email format');
+        }
+
+        // Find course by code
+        const course = await Course.findOne({ courseCode: row.courseCode.toUpperCase() });
+        if (!course) {
+          throw new Error(`Course ${row.courseCode} not found`);
+        }
+
+        // Check if email already exists
+        const existingStudent = await Student.findOne({ personalEmail: row.personalEmail });
+        if (existingStudent) {
+          throw new Error('Email already exists');
+        }
+
+        // Generate Student ID
+        const year = row.admissionYear || new Date().getFullYear();
+        const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+        const studentCount = await Student.countDocuments({
+          courseEnrolled: course._id,
+          admissionYear: year
+        });
+        const sequence = (studentCount + 1).toString().padStart(3, '0');
+        const studentId = `${course.courseCode}${year}${month}${sequence}`;
+
+        // Generate Institute Email
+        const cleanFirstName = row.firstName.toLowerCase().replace(/[^a-z]/g, '');
+        const cleanLastName = row.lastName.toLowerCase().replace(/[^a-z]/g, '');
+        const instituteEmail = `${cleanFirstName}.${cleanLastName}.${studentId.substring(studentId.length - 3)}@nursinginstitute.edu`;
+
+        // Generate Password
+        const generatePassword = () => {
+          const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+          let password = '';
+          for (let i = 0; i < 12; i++) {
+            password += chars.charAt(Math.floor(Math.random() * chars.length));
+          }
+          return password;
+        };
+        const password = generatePassword();
+
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Create User
+        const user = new User({
+          username: studentId,
+          email: instituteEmail,
+          password: hashedPassword,
+          role: 'student',
+          isActive: true
+        });
+        await user.save();
+
+        // Create Student
+        const student = new Student({
+          userId: user._id,
+          studentId: studentId,
+          firstName: row.firstName,
+          lastName: row.lastName,
+          fullName: `${row.firstName} ${row.lastName}`,
+          personalEmail: row.personalEmail,
+          instituteEmail: instituteEmail,
+          mobileNumber: row.mobileNumber,
+          dateOfBirth: row.dateOfBirth || null,
+          gender: row.gender || 'Other',
+          courseEnrolled: course._id,
+          admissionYear: parseInt(year),
+          admissionType: row.admissionType || 'Regular',
+          admissionQuota: row.admissionQuota || 'General',
+          semester: parseInt(row.semester) || 1,
+          academicStatus: 'Active',
+          admissionDate: new Date(),
+          previousEducation: {
+            qualification: row.qualification || '12th',
+            boardUniversity: row.boardUniversity || '',
+            passingYear: row.passingYear || '',
+            percentage: row.percentage || ''
+          },
+          fees: {
+            totalFees: course.feesStructure?.totalFee || 50000,
+            feesPaid: 0,
+            pendingFees: course.feesStructure?.totalFee || 50000
+          }
+        });
+
+        await student.save();
+
+        // Send email (in background, don't wait)
+        setTimeout(async () => {
+          try {
+            await sendStudentCredentials({
+              studentName: `${row.firstName} ${row.lastName}`,
+              personalEmail: row.personalEmail,
+              instituteEmail: instituteEmail,
+              studentId: studentId,
+              password: password
+            });
+          } catch (emailError) {
+            console.error('Failed to send email for:', row.personalEmail, emailError);
+          }
+        }, 0);
+
+        results.success++;
+        results.total++;
+
+      } catch (error) {
+        results.failed++;
+        results.total++;
+        errors.push({
+          row: rowNumber,
+          student: `${row.firstName} ${row.lastName}`,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up file
+    fs.unlinkSync(filePath);
+
+    results.errors = errors;
 
     res.json({
       success: true,
       message: 'Bulk upload completed',
       data: results
     });
+
   } catch (error) {
     console.error('Bulk Upload Students Error:', error);
+    
+    // Clean up file if exists
+    if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Failed to process bulk upload'
     });
   }
+};
+// @desc    Reset student password
+// @route   POST /api/admin/students/:id/reset-password
+// @access  Private (Admin)
+exports.resetStudentPassword = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword, sendEmail } = req.body;
+
+    const student = await Student.findById(id);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    const user = await User.findById(student.userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User account not found'
+      });
+    }
+
+    // Generate new password if not provided
+    const password = newPassword || generateStrongPassword();
+
+    // Hash and update password
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(password, salt);
+    await user.save();
+
+    // Send email if requested
+    if (sendEmail) {
+      try {
+        await sendPasswordResetEmail({
+          studentName: student.fullName,
+          personalEmail: student.personalEmail,
+          instituteEmail: student.instituteEmail,
+          newPassword: password
+        });
+      } catch (emailError) {
+        console.error('Failed to send email:', emailError);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Password reset successfully',
+      data: {
+        studentId: student.studentId,
+        instituteEmail: student.instituteEmail,
+        newPassword: password,
+        emailSent: sendEmail || false
+      }
+    });
+
+  } catch (error) {
+    console.error('Reset Student Password Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reset password'
+    });
+  }
+};
+
+// Helper: Generate strong password
+const generateStrongPassword = () => {
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+  const numbers = '0123456789';
+  const symbols = '!@#$%^&*';
+  
+  let password = '';
+  
+  password += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+  password += lowercase.charAt(Math.floor(Math.random() * lowercase.length));
+  password += numbers.charAt(Math.floor(Math.random() * numbers.length));
+  password += symbols.charAt(Math.floor(Math.random() * symbols.length));
+  
+  const allChars = uppercase + lowercase + numbers + symbols;
+  for (let i = 4; i < 12; i++) {
+    password += allChars.charAt(Math.floor(Math.random() * allChars.length));
+  }
+  
+  return password.split('').sort(() => 0.5 - Math.random()).join('');
+};
+
+// Helper: Send password reset email
+const sendPasswordResetEmail = async ({ studentName, personalEmail, instituteEmail, newPassword }) => {
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+
+  const mailOptions = {
+    from: `"Nursing Institute IT Support" <${process.env.EMAIL_USER}>`,
+    to: personalEmail,
+    subject: 'Password Reset - Nursing Institute Student Portal',
+    html: `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #ef4444; color: white; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+          <h2 style="margin: 0;">🔐 Password Reset Notification</h2>
+        </div>
+        
+        <div style="padding: 30px; background: #f8fafc; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0;">
+          <p>Hello ${studentName},</p>
+          <p>Your password for the Nursing Institute Student Portal has been reset by the administrator.</p>
+          
+          <div style="background: white; border: 2px solid #ef4444; border-radius: 10px; padding: 20px; margin: 20px 0;">
+            <h3 style="color: #ef4444; margin-top: 0;">New Login Credentials</h3>
+            <p><strong>Institute Email:</strong> ${instituteEmail}</p>
+            <p><strong>New Password:</strong> <code style="background: #fee2e2; padding: 5px 10px; border-radius: 4px;">${newPassword}</code></p>
+          </div>
+          
+          <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0;">
+            <h4 style="color: #d97706; margin-top: 0;">⚠️ Security Alert</h4>
+            <ul style="margin: 0; padding-left: 20px;">
+              <li>Change your password immediately after login</li>
+              <li>Do not share your password with anyone</li>
+              <li>Use a strong, unique password</li>
+              <li>Logout after each session</li>
+            </ul>
+          </div>
+          
+          <p style="text-align: center;">
+            <a href="${process.env.FRONTEND_URL}/login" style="background: #3b82f6; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">
+              Login to Student Portal
+            </a>
+          </p>
+          
+          <p style="margin-top: 30px; color: #64748b; font-size: 14px;">
+            If you did not request this password reset, please contact the IT department immediately.
+          </p>
+        </div>
+      </div>
+    `
+  };
+
+  await transporter.sendMail(mailOptions);
+};
+
+// @desc    Export students to CSV
+// @route   GET /api/admin/students/export
+// @access  Private (Admin)
+exports.exportStudents = async (req, res) => {
+  try {
+    const { course, academicStatus, batchYear } = req.query;
+
+    const query = {};
+    if (course) query.courseEnrolled = course;
+    if (academicStatus) query.academicStatus = academicStatus;
+    if (batchYear) query.admissionYear = parseInt(batchYear);
+
+    const students = await Student.find(query)
+      .populate('courseEnrolled', 'courseName courseCode')
+      .select('studentId fullName personalEmail instituteEmail mobileNumber courseEnrolled semester academicStatus admissionDate')
+      .sort({ studentId: 1 });
+
+    // Create CSV content
+    let csvContent = 'Student ID,Full Name,Personal Email,Institute Email,Mobile Number,Course,Semester,Status,Admission Date\n';
+    
+    students.forEach(student => {
+      csvContent += `"${student.studentId}","${student.fullName}","${student.personalEmail}","${student.instituteEmail}","${student.mobileNumber}","${student.courseEnrolled?.courseName || 'N/A'}","${student.semester}","${student.academicStatus}","${student.admissionDate.toISOString().split('T')[0]}"\n`;
+    });
+
+    // Set headers for file download
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=students_export.csv');
+    
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('Export Students Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to export students'
+    });
+  }
+};
+
+// @desc    Get student statistics
+// @route   GET /api/admin/students/stats/overview
+// @access  Private (Admin)
+exports.getStudentStatistics = async (req, res) => {
+  try {
+    // Overall statistics
+    const overallStats = await Student.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          active: {
+            $sum: { $cond: [{ $eq: ['$academicStatus', 'Active'] }, 1, 0] }
+          },
+          male: {
+            $sum: { $cond: [{ $eq: ['$gender', 'Male'] }, 1, 0] }
+          },
+          female: {
+            $sum: { $cond: [{ $eq: ['$gender', 'Female'] }, 1, 0] }
+          },
+          avgAttendance: { $avg: '$attendancePercentage' },
+          avgCGPA: { $avg: '$cgpa' }
+        }
+      }
+    ]);
+
+    // Year-wise admission trend
+    const admissionTrend = await Student.aggregate([
+      {
+        $group: {
+          _id: { $year: '$admissionDate' },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      },
+      {
+        $limit: 5
+      }
+    ]);
+
+    // Course-wise statistics
+    const courseStats = await Student.aggregate([
+      {
+        $group: {
+          _id: '$courseEnrolled',
+          total: { $sum: 1 },
+          active: {
+            $sum: { $cond: [{ $eq: ['$academicStatus', 'Active'] }, 1, 0] }
+          }
+        }
+      },
+      {
+        $lookup: {
+          from: 'courses',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'course'
+        }
+      },
+      {
+        $unwind: '$course'
+      },
+      {
+        $project: {
+          courseName: '$course.courseName',
+          courseCode: '$course.courseCode',
+          total: 1,
+          active: 1,
+          percentage: { $multiply: [{ $divide: ['$active', '$total'] }, 100] }
+        }
+      },
+      {
+        $sort: { total: -1 }
+      }
+    ]);
+
+    // Semester-wise distribution
+    const semesterStats = await Student.aggregate([
+      {
+        $match: { academicStatus: 'Active' }
+      },
+      {
+        $group: {
+          _id: '$semester',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      }
+    ]);
+
+    // Hostel statistics
+    const hostelStats = await Student.aggregate([
+      {
+        $group: {
+          _id: '$hostelAllotted',
+          count: { $sum: 1 },
+          male: {
+            $sum: { $cond: [{ $eq: ['$gender', 'Male'] }, 1, 0] }
+          },
+          female: {
+            $sum: { $cond: [{ $eq: ['$gender', 'Female'] }, 1, 0] }
+          }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        overall: overallStats[0] || {
+          total: 0,
+          active: 0,
+          male: 0,
+          female: 0,
+          avgAttendance: 0,
+          avgCGPA: 0
+        },
+        trends: {
+          admission: admissionTrend,
+          semester: semesterStats
+        },
+        courses: courseStats,
+        facilities: {
+          hostel: hostelStats,
+          transport: await Student.countDocuments({ transportFacility: true })
+        },
+        fees: await getFeesStatistics()
+      }
+    });
+
+  } catch (error) {
+    console.error('Get Student Statistics Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student statistics'
+    });
+  }
+};
+
+// Helper: Get fees statistics
+const getFeesStatistics = async () => {
+  const result = await Student.aggregate([
+    {
+      $group: {
+        _id: null,
+        totalFees: { $sum: '$fees.totalFees' },
+        paidFees: { $sum: '$fees.feesPaid' },
+        pendingFees: { $sum: '$fees.pendingFees' },
+        studentsWithPendingFees: {
+          $sum: {
+            $cond: [{ $gt: ['$fees.pendingFees', 0] }, 1, 0]
+          }
+        }
+      }
+    }
+  ]);
+
+  return result[0] || {
+    totalFees: 0,
+    paidFees: 0,
+    pendingFees: 0,
+    studentsWithPendingFees: 0
+  };
 };
 
 // @desc    Manage attendance

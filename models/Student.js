@@ -38,7 +38,8 @@ const studentSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Email is required'],
     lowercase: true,
-    trim: true
+    trim: true,
+    match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
   emergencyContact: {
     name: String,
@@ -73,7 +74,7 @@ const studentSchema = new mongoose.Schema({
   },
   batchYear: {
     type: Number,
-    required: true,
+    required: [true, 'Batch year is required'],
     min: [2000, 'Invalid year'],
     max: [new Date().getFullYear() + 5, 'Invalid year']
   },
@@ -110,7 +111,8 @@ const studentSchema = new mongoose.Schema({
   documents: [{
     documentType: {
       type: String,
-      enum: ['Aadhar', 'TC', 'Marksheet', 'Photo', 'Medical', 'Caste', 'Income', 'Other']
+      enum: ['Aadhar', 'TC', 'MarkSheet', 'Photo', 'Medical', 'Caste', 'Income', 'Other'],
+      required: true
     },
     documentName: String,
     documentUrl: String,
