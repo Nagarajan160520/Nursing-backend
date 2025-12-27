@@ -40,7 +40,7 @@ router.post('/students/:id/create-user', adminController.createUserForStudent);
 router.post('/students/create-missing-users', adminController.createUsersForMissingStudents);
 // Reset user password by user id
 router.post('/users/:id/reset-password', adminController.resetUserPassword);
-
+router.get('/students/check-email', adminController.checkEmailExists);
 // Faculty Management
 router.post('/faculty', adminController.addFaculty);
 router.get('/faculty', adminController.getAllFaculty);
