@@ -10,15 +10,15 @@ const adminSchema = new mongoose.Schema({
   employeeId: {
     type: String,
     required: true,
-    unique: true,
+    unique: true, 
     uppercase: true
   },
   fullName: {
     type: String,
     required: true,
     trim: true
-  },
-  designation: {
+  }, 
+  designation: { 
     type: String,
     required: true,
     enum: [

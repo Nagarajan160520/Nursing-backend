@@ -9,7 +9,7 @@ const gallerySchema = new mongoose.Schema({
   description: {
     type: String,
     trim: true
-  },
+  }, 
   imageUrl: {
     type: String,
     required: [true, 'Image URL is required']
