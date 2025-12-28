@@ -1,16 +1,32 @@
 const mongoose = require('mongoose');
 
 const studentSchema = new mongoose.Schema({
-  admissionNumber: {
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    unique: true
+  },
+  studentId: { // This is the generated ID, like GUIWG23202512001
     type: String,
     required: true,
     unique: true,
     uppercase: true,
     trim: true
   },
-  fullName: {
+  rollNumber: {
+    type: String,
+    trim: true,
+    unique: true,
+    sparse: true // Allows multiple null/undefined values but unique if present
+  },
+  firstName: {
     type: String,
     required: true,
+    trim: true
+  },
+  lastName: {
+    type: String,
     trim: true
   },
   dateOfBirth: {
@@ -22,7 +38,8 @@ const studentSchema = new mongoose.Schema({
     enum: ['Male', 'Female', 'Other'],
     required: true
   },
-  email: {
+  bloodGroup: String,
+  personalEmail: {
     type: String,
     required: true,
     unique: true,
@@ -30,38 +47,111 @@ const studentSchema = new mongoose.Schema({
     trim: true,
     match: [/^\w+([\.-]?\w+)*@\w+([\.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
-  contactNumber: {
+  instituteEmail: {
+    type: String,
+    unique: true,
+    sparse: true, // Allows multiple null values
+    lowercase: true,
+    trim: true
+  },
+  mobileNumber: {
     type: String,
     required: true,
     match: [/^[0-9]{10}$/, 'Please enter a valid 10-digit phone number']
   },
-  course: {
-    type: String,
-    required: true,
-    trim: true
-  },
-  year: {
-    type: String,
-    required: true
-  },
-  address: {
-    street: String,
+  alternateMobile: String,
+  whatsappNumber: String,
+  permanentAddress: {
+    addressLine1: String,
+    addressLine2: String,
     city: String,
     state: String,
     pincode: String,
     country: { type: String, default: 'India' }
   },
-  guardian: {
-    name: String,
-    relation: String,
-    contactNumber: String
+  correspondenceAddress: {
+    sameAsPermanent: Boolean,
+    addressLine1: String,
+    addressLine2: String,
+    city: String,
+    state: String,
+    pincode: String,
+    country: { type: String, default: 'India' }
   },
-  isActive: {
+  fatherName: String,
+  fatherOccupation: String,
+  fatherMobile: String,
+  motherName: String,
+  motherOccupation: String,
+  motherMobile: String,
+  guardianName: String,
+  guardianRelation: String,
+  guardianMobile: String,
+  courseEnrolled: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Course',
+    required: true
+  },
+  admissionYear: {
+    type: Number,
+    required: true
+  },
+  batchYear: Number,
+  semester: {
+    type: Number,
+    required: true
+  },
+  admissionType: {
+    type: String,
+    enum: ['Regular', 'Lateral']
+  },
+  admissionQuota: {
+    type: String,
+    enum: ['General', 'Management', 'NRI']
+  },
+  academicStatus: {
+    type: String,
+    enum: ['Active', 'Completed', 'Discontinued', 'On Leave', 'Suspended'],
+    default: 'Active'
+  },
+  admissionDate: {
+    type: Date,
+    default: Date.now
+  },
+  education: [{
+    qualification: String,
+    boardUniversity: String, 
+    passingYear: String,
+    percentage: String,
+    schoolCollege: String
+  }],
+  requireHostel: Boolean,
+  hostelType: String,
+  requireTransport: Boolean,
+  transportRoute: String,
+  documents: mongoose.Schema.Types.Mixed,
+  isActive: { // General status of the record
     type: Boolean,
     default: true
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-module.exports = mongoose.model('Student', studentSchema);
+// Virtual for full name
+studentSchema.virtual('fullName').get(function() {
+  return `${this.firstName || ''} ${this.lastName || ''}`.trim();
+});
+
+// Indexes
+studentSchema.index({ studentId: 1 });
+studentSchema.index({ personalEmail: 1 });
+studentSchema.index({ instituteEmail: 1 });
+studentSchema.index({ admissionYear: 1 });
+studentSchema.index({ courseEnrolled: 1 });
+studentSchema.index({ mobileNumber: 1 });
+
+
+module.exports = mongoose.model('Student', studentSchema); 
