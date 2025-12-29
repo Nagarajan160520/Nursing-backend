@@ -29,20 +29,21 @@ router.get('/news', adminController.getAllNews);
 router.put('/news/:id', adminController.updateNews);
 router.delete('/news/:id', adminController.deleteNews);
 
-// ✅ **ADD THESE MISSING ROUTES HERE:**
-// Student Management
+// ✅ **CRITICAL - Student Management Routes MUST be added:**
 router.post('/students', adminController.addStudent);
 router.get('/students', adminController.getAllStudents);
 router.get('/students/:id', adminController.getStudentDetails);
 router.put('/students/:id', adminController.updateStudent);
 router.delete('/students/:id', adminController.deleteStudent);
-router.post('/students/bulk-upload', upload.single('file'), adminController.bulkUploadStudents);
 
-// ✅ **ADD THESE CRITICAL ROUTES:**
+// ✅ **Essential Validation Routes:**
 router.get('/students/check-email', adminController.checkEmail);
 router.get('/students/check-mobile', adminController.checkMobile);
 router.get('/students/count', adminController.getStudentCount);
 
+// ✅ **Add these as well:**
+router.post('/students/bulk-upload', upload.single('file'), adminController.bulkUploadStudents);
+router.post('/students/:id/reset-password', adminController.resetStudentPassword);
 // Student User Management
 router.post('/students/:id/create-user', adminController.createUserForStudent);
 router.post('/students/create-missing-users', adminController.createUsersForMissingStudents);

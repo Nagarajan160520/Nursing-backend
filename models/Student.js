@@ -105,6 +105,7 @@ const studentSchema = new mongoose.Schema({
     type: String,
     enum: ['Regular', 'Lateral']
   },
+  
   admissionQuota: {
     type: String,
     enum: ['General', 'Management', 'NRI']

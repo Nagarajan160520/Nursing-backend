@@ -1185,9 +1185,7 @@ exports.deleteFaculty = async (req, res) => {
   }
 };
 
-// ✅ **UPDATE THE ADD STUDENT FUNCTION - FIXED VERSION:**
-
-// @desc    Add new student (FIXED - NO DUPLICATE ERROR)
+// @desc    Add new student - SIMPLIFIED VERSION
 // @route   POST /api/admin/students
 // @access  Private (Admin)
 exports.addStudent = async (req, res) => {
@@ -1195,251 +1193,176 @@ exports.addStudent = async (req, res) => {
   session.startTransaction();
   
   try {
-    console.log('📝 ADD STUDENT REQUEST RECEIVED');
-    console.log('Request Body:', JSON.stringify(req.body, null, 2));
+    console.log('📝 ADD STUDENT REQUEST:', req.body);
 
+    // Extract only essential fields (matches your frontend form)
     const {
       firstName,
       lastName,
       personalEmail,
       mobileNumber,
       courseEnrolled,
+      gender = 'Male',
+      dateOfBirth,
       fatherName,
       fatherMobile,
-      gender,
-      dateOfBirth,
-      bloodGroup,
-      alternateMobile,
-      whatsappNumber,
-      permanentAddress,
-      correspondenceAddress,
-      admissionYear,
-      admissionType,
-      admissionQuota,
-      semester,
-      rollNumber,
-      qualification,
-      boardUniversity,
-      passingYear,
-      percentage,
-      schoolCollege,
-      requireHostel,
-      requireTransport,
-      hostelType,
-      transportRoute,
-      documents
+      admissionYear = new Date().getFullYear(),
+      semester = 1
     } = req.body;
 
-    // Validate required fields
-    if (!firstName || !lastName || !personalEmail || !mobileNumber || !courseEnrolled || !fatherName || !fatherMobile) {
+    // ✅ VALIDATE REQUIRED FIELDS
+    const requiredFields = [
+      'firstName', 'lastName', 'personalEmail', 
+      'mobileNumber', 'courseEnrolled'
+    ];
+    
+    const missingFields = requiredFields.filter(field => !req.body[field]);
+    
+    if (missingFields.length > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields: firstName, lastName, personalEmail, mobileNumber, courseEnrolled, fatherName, fatherMobile'
+        message: `Missing required fields: ${missingFields.join(', ')}`
       });
     }
 
-    // Validate email format
+    // ✅ Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(personalEmail)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid email format'
+        message: 'Please enter a valid email address'
       });
     }
 
-    // Validate mobile number (10 digits)
+    // ✅ Validate mobile number (10 digits)
     const mobileRegex = /^[0-9]{10}$/;
     if (!mobileRegex.test(mobileNumber)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid mobile number (must be 10 digits)'
+        message: 'Please enter a valid 10-digit mobile number'
       });
     }
 
-    // Check if email already exists
-    const existingEmail = await Student.findOne({ personalEmail: personalEmail.toLowerCase() });
+    // ✅ Check for existing email
+    const existingEmail = await Student.findOne({ 
+      personalEmail: personalEmail.toLowerCase() 
+    }).session(session);
+    
     if (existingEmail) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
-        message: 'Personal email already exists'
+        message: 'Student with this email already exists',
+        existingStudentId: existingEmail.studentId
       });
     }
 
-    // Check if mobile already exists
-    const existingMobile = await Student.findOne({ mobileNumber });
+    // ✅ Check for existing mobile
+    const existingMobile = await Student.findOne({ 
+      mobileNumber: mobileNumber 
+    }).session(session);
+    
     if (existingMobile) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(400).json({
         success: false,
-        message: 'Mobile number already exists'
+        message: 'Student with this mobile number already exists',
+        existingStudentId: existingMobile.studentId
       });
     }
 
-    // Get course details
-    const course = await Course.findById(courseEnrolled);
+    // ✅ Get course details
+    const course = await Course.findById(courseEnrolled).session(session);
     if (!course) {
+      await session.abortTransaction();
+      session.endSession();
+      
       return res.status(404).json({
         success: false,
         message: 'Course not found'
       });
     }
 
-    console.log('📚 Course found:', course.courseCode, '-', course.courseName);
-
-    // Generate unique student ID
-    const year = admissionYear || new Date().getFullYear();
-    const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+    // ✅ Generate UNIQUE Student ID
+    const now = new Date();
+    const year = now.getFullYear().toString();
     
-    // Find existing students for this course and year
-    const existingStudents = await Student.find({
+    // Get count for sequence
+    const count = await Student.countDocuments({
       courseEnrolled: course._id,
       admissionYear: year
-    }).sort({ createdAt: -1 });
+    }).session(session);
     
-    let sequence = 1;
-    if (existingStudents.length > 0) {
-      // Get the highest sequence number
-      const lastStudent = existingStudents[0];
-      const lastStudentId = lastStudent.studentId;
-      const lastSequence = parseInt(lastStudentId.slice(-3)) || 0;
-      sequence = lastSequence + 1;
-    }
+    const sequence = (count + 1).toString().padStart(3, '0');
+    const studentId = `${course.courseCode}${year}${sequence}`;
     
-    const sequenceStr = sequence.toString().padStart(3, '0');
-    let studentId = `${course.courseCode}${year}${month}${sequenceStr}`;
-
     console.log('🎯 Generated Student ID:', studentId);
 
-    // Check if student ID already exists (just in case)
-    let duplicateCheck = await Student.findOne({ studentId });
-    let attempts = 0;
-    while (duplicateCheck && attempts < 10) {
-      sequence += 1;
-      studentId = `${course.courseCode}${year}${month}${sequence.toString().padStart(3, '0')}`;
-      duplicateCheck = await Student.findOne({ studentId });
-      attempts++;
-    }
-
-    // Generate institute email
-    const firstNameClean = firstName.toLowerCase().replace(/[^a-z]/g, '');
-    const lastNameClean = lastName.toLowerCase().replace(/[^a-z]/g, '');
-    const instituteEmail = `${firstNameClean}.${lastNameClean}.${studentId.slice(-3)}@nursinginstitute.edu`.toLowerCase();
-
+    // ✅ Generate Institute Email
+    const cleanFirstName = firstName.toLowerCase().replace(/[^a-z]/g, '');
+    const cleanLastName = lastName.toLowerCase().replace(/[^a-z]/g, '');
+    const instituteEmail = `${cleanFirstName}.${cleanLastName}.${studentId.substring(studentId.length - 3)}@nursinginstitute.edu`.toLowerCase();
+    
     console.log('📧 Generated Institute Email:', instituteEmail);
 
-    // Generate strong password
+    // ✅ Generate Secure Password
     const generatePassword = () => {
-      const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-      const lower = 'abcdefghijklmnopqrstuvwxyz';
-      const numbers = '0123456789';
-      const symbols = '!@#$%^&*';
-      
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
       let password = '';
-      password += upper[Math.floor(Math.random() * upper.length)];
-      password += lower[Math.floor(Math.random() * lower.length)];
-      password += numbers[Math.floor(Math.random() * numbers.length)];
-      password += symbols[Math.floor(Math.random() * symbols.length)];
       
-      const allChars = upper + lower + numbers + symbols;
+      // Ensure at least one of each type
+      password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
+      password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];
+      password += '0123456789'[Math.floor(Math.random() * 10)];
+      password += '!@#$%^&*'[Math.floor(Math.random() * 8)];
+      
+      // Fill rest
       for (let i = 4; i < 12; i++) {
-        password += allChars[Math.floor(Math.random() * allChars.length)];
+        password += chars[Math.floor(Math.random() * chars.length)];
       }
       
+      // Shuffle
       return password.split('').sort(() => Math.random() - 0.5).join('');
     };
-
+    
     const password = generatePassword();
     console.log('🔐 Generated Password:', password);
 
-    // Check if username (studentId) already exists in User collection
-    let existingUser = await User.findOne({ username: studentId });
-    if (existingUser) {
-      // Generate new student ID if username exists
-      sequence += 1;
-      studentId = `${course.courseCode}${year}${month}${sequence.toString().padStart(3, '0')}`;
-      console.log('🔄 Regenerated Student ID due to duplicate username:', studentId);
-    }
-
-    // Create user account
+    // ✅ Create User Account
     const user = new User({
       username: studentId,
       email: instituteEmail,
       password: password,
       role: 'student',
-      isActive: true,
-      profileImage: ''
+      isActive: true
     });
 
     await user.save({ session });
     console.log('✅ User created:', user._id);
 
-    // Create student profile
+    // ✅ Create Student Profile (SIMPLIFIED - matches schema)
     const student = new Student({
       userId: user._id,
       studentId: studentId,
       firstName: firstName,
       lastName: lastName,
-      fullName: `${firstName} ${lastName}`,
       personalEmail: personalEmail.toLowerCase(),
       instituteEmail: instituteEmail,
       mobileNumber: mobileNumber,
-      alternateMobile: alternateMobile || '',
-      whatsappNumber: whatsappNumber || '',
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-      gender: gender || 'Male',
-      bloodGroup: bloodGroup || '',
-      
-      permanentAddress: permanentAddress || {
-        addressLine1: '',
-        addressLine2: '',
-        city: '',
-        state: '',
-        pincode: '',
-        country: 'India'
-      },
-      
-      correspondenceAddress: correspondenceAddress || {
-        addressLine1: '',
-        addressLine2: '',
-        city: '',
-        state: '',
-        pincode: '',
-        sameAsPermanent: true
-      },
-      
-      fatherName: fatherName,
-      fatherOccupation: '',
-      fatherMobile: fatherMobile,
-      motherName: '',
-      motherOccupation: '',
-      motherMobile: '',
-      guardianName: '',
-      guardianRelation: '',
-      guardianMobile: '',
-      
+      gender: gender,
+      fatherName: fatherName || '',
+      fatherMobile: fatherMobile || '',
       courseEnrolled: course._id,
-      admissionYear: year,
-      admissionType: admissionType || 'Regular',
-      admissionQuota: admissionQuota || 'General',
-      semester: semester || 1,
-      rollNumber: rollNumber || '',
-      
-      qualification: qualification || '',
-      boardUniversity: boardUniversity || '',
-      passingYear: passingYear || '',
-      percentage: percentage || '',
-      schoolCollege: schoolCollege || '',
-      
-      requireHostel: requireHostel || false,
-      requireTransport: requireTransport || false,
-      hostelType: hostelType || '',
-      transportRoute: transportRoute || '',
-      
-      documents: documents || {},
-      
+      admissionYear: parseInt(admissionYear),
+      semester: parseInt(semester) || 1,
+      admissionDate: now,
       academicStatus: 'Active',
-      admissionDate: new Date(),
-      attendancePercentage: 0,
-      cgpa: 0
+      isActive: true
     });
 
     await student.save({ session });
@@ -1455,9 +1378,8 @@ exports.addStudent = async (req, res) => {
 
     console.log('✅ Transaction committed successfully');
 
-    // Send email with credentials (optional - run outside transaction)
+    // ✅ Send Welcome Email (async - optional)
     try {
-      const nodemailer = require('nodemailer');
       const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
@@ -1472,25 +1394,36 @@ exports.addStudent = async (req, res) => {
         subject: 'Welcome to Nursing Institute - Your Login Credentials',
         html: `
           <h2>Welcome ${firstName} ${lastName}!</h2>
-          <p>Your admission to Nursing Institute has been processed successfully.</p>
+          <p>Your admission to ${course.courseName} has been processed successfully.</p>
           <h3>Your Login Credentials:</h3>
           <ul>
             <li><strong>Student ID:</strong> ${studentId}</li>
-            <li><strong>Institute Email:</strong> ${instituteEmail}</li>
+            <li><strong>Username/Email:</strong> ${instituteEmail}</li>
             <li><strong>Password:</strong> ${password}</li>
             <li><strong>Login URL:</strong> ${process.env.FRONTEND_URL || 'http://localhost:3000'}/login</li>
           </ul>
-          <p><strong>Important:</strong> Change your password after first login.</p>
+          <p><strong>Important:</strong></p>
+          <ul>
+            <li>Use Institute Email as username to login</li>
+            <li>Change your password after first login</li>
+            <li>Keep these credentials secure</li>
+          </ul>
           <p>Best regards,<br>Nursing Institute Administration</p>
         `
       };
 
-      await transporter.sendMail(mailOptions);
-      console.log('📧 Welcome email sent');
+      transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+          console.log('📧 Email sending failed:', error);
+        } else {
+          console.log('📧 Email sent:', info.response);
+        }
+      });
     } catch (emailError) {
-      console.log('Email sending failed, but student created:', emailError.message);
+      console.log('Email error (non-critical):', emailError.message);
     }
 
+    // ✅ Return success response
     res.status(201).json({
       success: true,
       message: 'Student added successfully',
@@ -1500,43 +1433,79 @@ exports.addStudent = async (req, res) => {
           studentId: studentId,
           fullName: `${firstName} ${lastName}`,
           personalEmail: personalEmail,
-          instituteEmail: instituteEmail,
-          course: course.courseName,
-          mobileNumber: mobileNumber
+          courseName: course.courseName
         },
         credentials: {
           studentId: studentId,
           instituteEmail: instituteEmail,
           password: password,
-          note: 'Password must be changed on first login'
+          loginUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`
         }
       }
     });
 
   } catch (error) {
     // Abort transaction on error
-    await session.abortTransaction();
+    if (session.inTransaction()) {
+      await session.abortTransaction();
+    }
     session.endSession();
     
     console.error('❌ Add Student Error:', error);
-    console.error('Error Stack:', error.stack);
-    
-    // If it's a duplicate key error, provide specific message
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Duplicate entry found. Please try again with different details.',
-        error: error.keyValue
-      });
-    }
     
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to add student',
-      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
-};// Helper: Send student credentials email (UPDATED)
+};
+
+// @desc    Test student creation with sample data
+// @route   POST /api/admin/students/test
+// @access  Private (Admin)
+exports.testAddStudent = async (req, res) => {
+  try {
+    const testData = {
+      firstName: "John",
+      lastName: "Doe",
+      personalEmail: "john.doe.test@gmail.com",
+      mobileNumber: "9876543210",
+      courseEnrolled: "", // Add a valid course ID here
+      gender: "Male",
+      dateOfBirth: "2000-01-01",
+      fatherName: "Robert Doe",
+      fatherMobile: "9876543211",
+      admissionYear: 2024,
+      semester: 1
+    };
+
+    // First, get a course ID
+    const course = await Course.findOne();
+    if (!course) {
+      return res.status(400).json({
+        success: false,
+        message: "No courses found. Please create a course first."
+      });
+    }
+
+    testData.courseEnrolled = course._id;
+
+    console.log('🧪 Testing with data:', testData);
+    
+    // Call the actual addStudent function
+    req.body = testData;
+    return exports.addStudent(req, res);
+    
+  } catch (error) {
+    console.error('Test Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Test failed: ' + error.message
+    });
+  }
+};
+// Helper: Send student credentials email (UPDATED)
 const sendStudentCredentials = async ({ studentName, personalEmail, instituteEmail, studentId, password }) => {
   try {
     const transporter = nodemailer.createTransport({
