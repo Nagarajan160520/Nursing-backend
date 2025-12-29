@@ -29,6 +29,7 @@ router.get('/news', adminController.getAllNews);
 router.put('/news/:id', adminController.updateNews);
 router.delete('/news/:id', adminController.deleteNews);
 
+// ✅ **ADD THESE MISSING ROUTES HERE:**
 // Student Management
 router.post('/students', adminController.addStudent);
 router.get('/students', adminController.getAllStudents);
@@ -36,12 +37,20 @@ router.get('/students/:id', adminController.getStudentDetails);
 router.put('/students/:id', adminController.updateStudent);
 router.delete('/students/:id', adminController.deleteStudent);
 router.post('/students/bulk-upload', upload.single('file'), adminController.bulkUploadStudents);
+
+// ✅ **ADD THESE CRITICAL ROUTES:**
+router.get('/students/check-email', adminController.checkEmail);
+router.get('/students/check-mobile', adminController.checkMobile);
+router.get('/students/count', adminController.getStudentCount);
+
+// Student User Management
 router.post('/students/:id/create-user', adminController.createUserForStudent);
 router.post('/students/create-missing-users', adminController.createUsersForMissingStudents);
+
 // Reset user password by user id
 router.post('/users/:id/reset-password', adminController.resetUserPassword);
-router.get('/students/check-email', adminController.checkEmailExists);
-// Faculty Management
+
+// ✅ **ADD FACULTY ROUTES:**
 router.post('/faculty', adminController.addFaculty);
 router.get('/faculty', adminController.getAllFaculty);
 router.get('/faculty/:id', adminController.getFacultyById);
@@ -54,12 +63,6 @@ router.get('/attendance', adminController.getAttendance);
 router.get('/attendance/report', adminController.generateAttendanceReport);
 router.post('/attendance/bulk', upload.single('file'), adminController.bulkUploadAttendance);
 
-// Settings Management
-router.get('/settings', adminController.getSettings);
-router.put('/settings', adminController.updateSettings);
-router.post('/settings/reset', adminController.resetSettings);
-router.post('/clear-cache', adminController.clearCache);
-router.get('/system-check', adminController.systemCheck);
 // Marks Management
 router.post('/marks', adminController.manageMarks);
 router.put('/marks/publish', adminController.publishMarks);
@@ -69,5 +72,12 @@ router.post('/downloads', upload.single('file'), adminController.uploadStudyMate
 router.get('/downloads', adminController.getAllDownloads);
 router.put('/downloads/:id', adminController.updateDownload);
 router.delete('/downloads/:id', adminController.deleteDownload);
+
+// Settings Management
+router.get('/settings', adminController.getSettings);
+router.put('/settings', adminController.updateSettings);
+router.post('/settings/reset', adminController.resetSettings);
+router.post('/clear-cache', adminController.clearCache);
+router.get('/system-check', adminController.systemCheck);
 
 module.exports = router;

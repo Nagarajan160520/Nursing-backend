@@ -808,29 +808,412 @@ exports.checkEmailExists = async (req, res) => {
     });
   }
 };
-// @desc    Add new student with auto-generated credentials
+// ✅ **ADD THESE FUNCTIONS AT THE BEGINNING OF YOUR adminController.js:**
+
+// @desc    Check if email exists
+// @route   GET /api/admin/students/check-email
+// @access  Private (Admin)
+exports.checkEmail = async (req, res) => {
+  try {
+    const { email } = req.query;
+    
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email parameter is required'
+      });
+    }
+
+    // Check in User collection
+    const userExists = await User.findOne({ email: email.toLowerCase() });
+    
+    // Check in Student collection (personal email)
+    const studentExists = await Student.findOne({ 
+      personalEmail: email.toLowerCase() 
+    });
+
+    res.json({
+      success: true,
+      exists: !!(userExists || studentExists),
+      message: userExists || studentExists 
+        ? 'Email already exists in system' 
+        : 'Email is available'
+    });
+
+  } catch (error) {
+    console.error('Check Email Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking email'
+    });
+  }
+};
+
+// @desc    Check if mobile exists
+// @route   GET /api/admin/students/check-mobile
+// @access  Private (Admin)
+exports.checkMobile = async (req, res) => {
+  try {
+    const { mobile } = req.query;
+    
+    if (!mobile) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile parameter is required'
+      });
+    }
+
+    const studentExists = await Student.findOne({ 
+      mobileNumber: mobile 
+    });
+
+    res.json({
+      success: true,
+      exists: !!studentExists,
+      message: studentExists 
+        ? 'Mobile number already exists' 
+        : 'Mobile number is available'
+    });
+
+  } catch (error) {
+    console.error('Check Mobile Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error checking mobile number'
+    });
+  }
+};
+
+// @desc    Get student count for sequence
+// @route   GET /api/admin/students/count
+// @access  Private (Admin)
+exports.getStudentCount = async (req, res) => {
+  try {
+    const { year, courseCode } = req.query;
+    
+    let query = {};
+    
+    if (year) {
+      query.admissionYear = parseInt(year);
+    }
+    
+    if (courseCode) {
+      // Find course by code
+      const course = await Course.findOne({ courseCode });
+      if (course) {
+        query.courseEnrolled = course._id;
+      }
+    }
+    
+    const count = await Student.countDocuments(query);
+    
+    res.json({
+      success: true,
+      count: count
+    });
+
+  } catch (error) {
+    console.error('Get Student Count Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error getting student count'
+    });
+  }
+};
+
+// @desc    Get all faculty
+// @route   GET /api/admin/faculty
+// @access  Private (Admin)
+exports.getAllFaculty = async (req, res) => {
+  try {
+    const { search, department, isActive } = req.query;
+    
+    let query = {};
+    
+    if (search) {
+      query.$or = [
+        { fullName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { facultyId: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (department) {
+      query.department = department;
+    }
+    
+    if (isActive !== undefined) {
+      query.isActive = isActive === 'true';
+    }
+    
+    const faculty = await Faculty.find(query)
+      .select('-__v')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: faculty,
+      count: faculty.length
+    });
+
+  } catch (error) {
+    console.error('Get Faculty Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch faculty'
+    });
+  }
+};
+
+// @desc    Get faculty by ID
+// @route   GET /api/admin/faculty/:id
+// @access  Private (Admin)
+exports.getFacultyById = async (req, res) => {
+  try {
+    const faculty = await Faculty.findById(req.params.id)
+      .select('-__v')
+      .populate('userId', 'username email isActive');
+
+    if (!faculty) {
+      return res.status(404).json({
+        success: false,
+        message: 'Faculty not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: faculty
+    });
+
+  } catch (error) {
+    console.error('Get Faculty By ID Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch faculty'
+    });
+  }
+};
+
+// @desc    Add new faculty
+// @route   POST /api/admin/faculty
+// @access  Private (Admin)
+exports.addFaculty = async (req, res) => {
+  try {
+    const {
+      facultyId,
+      fullName,
+      email,
+      password,
+      designation,
+      department,
+      qualification,
+      experience,
+      contactNumber,
+      address,
+      isActive = true
+    } = req.body;
+
+    // Validate required fields
+    if (!facultyId || !fullName || !email || !designation || !department) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: facultyId, fullName, email, designation, department'
+      });
+    }
+
+    // Check if email exists
+    const existingEmail = await User.findOne({ email });
+    if (existingEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already exists'
+      });
+    }
+
+    // Check if faculty ID exists
+    const existingFacultyId = await Faculty.findOne({ facultyId });
+    if (existingFacultyId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Faculty ID already exists'
+      });
+    }
+
+    // Create user account
+    const user = new User({
+      username: facultyId,
+      email: email,
+      password: password || 'faculty@123',
+      role: 'faculty',
+      isActive: isActive
+    });
+
+    await user.save();
+
+    // Create faculty profile
+    const faculty = new Faculty({
+      userId: user._id,
+      facultyId: facultyId,
+      fullName: fullName,
+      email: email,
+      designation: designation,
+      department: department,
+      qualification: qualification || '',
+      experience: experience || 0,
+      contactNumber: contactNumber || '',
+      address: address || '',
+      isActive: isActive
+    });
+
+    await faculty.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Faculty added successfully',
+      data: {
+        user: {
+          _id: user._id,
+          username: user.username,
+          email: user.email,
+          role: user.role
+        },
+        faculty: {
+          _id: faculty._id,
+          facultyId: faculty.facultyId,
+          fullName: faculty.fullName,
+          designation: faculty.designation,
+          department: faculty.department
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Add Faculty Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to add faculty'
+    });
+  }
+};
+
+// @desc    Update faculty
+// @route   PUT /api/admin/faculty/:id
+// @access  Private (Admin)
+exports.updateFaculty = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const faculty = await Faculty.findById(id);
+    if (!faculty) {
+      return res.status(404).json({
+        success: false,
+        message: 'Faculty not found'
+      });
+    }
+
+    // Update faculty fields
+    const allowedUpdates = [
+      'fullName', 'designation', 'department', 'qualification',
+      'experience', 'contactNumber', 'address', 'isActive'
+    ];
+
+    Object.keys(updates).forEach(key => {
+      if (allowedUpdates.includes(key)) {
+        faculty[key] = updates[key];
+      }
+    });
+
+    await faculty.save();
+
+    // Update user if needed
+    if (updates.email) {
+      await User.findByIdAndUpdate(faculty.userId, {
+        email: updates.email,
+        isActive: updates.isActive !== undefined ? updates.isActive : faculty.isActive
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Faculty updated successfully',
+      data: faculty
+    });
+
+  } catch (error) {
+    console.error('Update Faculty Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to update faculty'
+    });
+  }
+};
+
+// @desc    Delete faculty
+// @route   DELETE /api/admin/faculty/:id
+// @access  Private (Admin)
+exports.deleteFaculty = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const faculty = await Faculty.findById(id);
+    if (!faculty) {
+      return res.status(404).json({
+        success: false,
+        message: 'Faculty not found'
+      });
+    }
+
+    // Delete user account
+    await User.findByIdAndDelete(faculty.userId);
+
+    // Delete faculty profile
+    await Faculty.findByIdAndDelete(id);
+
+    res.json({
+      success: true,
+      message: 'Faculty deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete Faculty Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete faculty'
+    });
+  }
+};
+
+// ✅ **UPDATE THE ADD STUDENT FUNCTION - FIXED VERSION:**
+
+// @desc    Add new student (FIXED - NO DUPLICATE ERROR)
 // @route   POST /api/admin/students
 // @access  Private (Admin)
 exports.addStudent = async (req, res) => {
-  console.log('📝 ADD STUDENT REQUEST RECEIVED');
-  console.log('Request Body:', JSON.stringify(req.body, null, 2));
+  const session = await mongoose.startSession();
+  session.startTransaction();
   
   try {
+    console.log('📝 ADD STUDENT REQUEST RECEIVED');
+    console.log('Request Body:', JSON.stringify(req.body, null, 2));
+
     const {
       firstName,
       lastName,
       personalEmail,
       mobileNumber,
       courseEnrolled,
-      dateOfBirth,
-      gender,
-      bloodGroup,
       fatherName,
       fatherMobile,
-      motherName,
-      motherMobile,
+      gender,
+      dateOfBirth,
+      bloodGroup,
+      alternateMobile,
+      whatsappNumber,
       permanentAddress,
       correspondenceAddress,
+      admissionYear,
       admissionType,
       admissionQuota,
       semester,
@@ -848,11 +1231,10 @@ exports.addStudent = async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!firstName || !lastName || !personalEmail || !mobileNumber || !courseEnrolled) {
+    if (!firstName || !lastName || !personalEmail || !mobileNumber || !courseEnrolled || !fatherName || !fatherMobile) {
       return res.status(400).json({
         success: false,
-        message: 'Required fields: firstName, lastName, personalEmail, mobileNumber, courseEnrolled',
-        received: req.body
+        message: 'Missing required fields: firstName, lastName, personalEmail, mobileNumber, courseEnrolled, fatherName, fatherMobile'
       });
     }
 
@@ -862,6 +1244,33 @@ exports.addStudent = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Invalid email format'
+      });
+    }
+
+    // Validate mobile number (10 digits)
+    const mobileRegex = /^[0-9]{10}$/;
+    if (!mobileRegex.test(mobileNumber)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid mobile number (must be 10 digits)'
+      });
+    }
+
+    // Check if email already exists
+    const existingEmail = await Student.findOne({ personalEmail: personalEmail.toLowerCase() });
+    if (existingEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'Personal email already exists'
+      });
+    }
+
+    // Check if mobile already exists
+    const existingMobile = await Student.findOne({ mobileNumber });
+    if (existingMobile) {
+      return res.status(400).json({
+        success: false,
+        message: 'Mobile number already exists'
       });
     }
 
@@ -876,212 +1285,210 @@ exports.addStudent = async (req, res) => {
 
     console.log('📚 Course found:', course.courseCode, '-', course.courseName);
 
-    // Generate UNIQUE Student ID
-    const generateUniqueStudentId = async (courseCode, attempt = 1) => {
-      const year = new Date().getFullYear();
-      const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
-      
-      // Get count and add attempt number to make unique
-      const studentCount = await Student.countDocuments({
-        courseEnrolled: courseEnrolled,
-        admissionYear: year
-      });
-      
-      // Try different sequences if ID exists
-      const sequence = (studentCount + attempt).toString().padStart(3, '0');
-      const studentId = `${courseCode}${year}${month}${sequence}`;
-      
-      // Check if this ID already exists
-      const existingId = await Student.findOne({ studentId });
-      if (existingId) {
-        console.log(`🔄 Student ID ${studentId} exists, trying attempt ${attempt + 1}`);
-        return generateUniqueStudentId(courseCode, attempt + 1);
-      }
-      
-      return studentId;
-    };
+    // Generate unique student ID
+    const year = admissionYear || new Date().getFullYear();
+    const month = (new Date().getMonth() + 1).toString().padStart(2, '0');
+    
+    // Find existing students for this course and year
+    const existingStudents = await Student.find({
+      courseEnrolled: course._id,
+      admissionYear: year
+    }).sort({ createdAt: -1 });
+    
+    let sequence = 1;
+    if (existingStudents.length > 0) {
+      // Get the highest sequence number
+      const lastStudent = existingStudents[0];
+      const lastStudentId = lastStudent.studentId;
+      const lastSequence = parseInt(lastStudentId.slice(-3)) || 0;
+      sequence = lastSequence + 1;
+    }
+    
+    const sequenceStr = sequence.toString().padStart(3, '0');
+    let studentId = `${course.courseCode}${year}${month}${sequenceStr}`;
 
-    const studentId = await generateUniqueStudentId(course.courseCode);
     console.log('🎯 Generated Student ID:', studentId);
 
-    // Generate UNIQUE Institute Email
-    const generateUniqueInstituteEmail = async (firstName, lastName, studentId, attempt = 1) => {
-      const cleanFirstName = firstName.toLowerCase().replace(/[^a-z]/g, '');
-      const cleanLastName = lastName.toLowerCase().replace(/[^a-z]/g, '');
-      
-      let email;
-      if (attempt === 1) {
-        email = `${cleanFirstName}.${cleanLastName}.${studentId.substring(studentId.length - 3)}@nursinginstitute.edu`;
-      } else {
-        email = `${cleanFirstName}.${cleanLastName}.${studentId.substring(studentId.length - 3)}.${attempt}@nursinginstitute.edu`;
-      }
-      
-      // Check if email exists
-      const existingEmail = await User.findOne({ email });
-      if (existingEmail) {
-        console.log(`🔄 Email ${email} exists, trying attempt ${attempt + 1}`);
-        return generateUniqueInstituteEmail(firstName, lastName, studentId, attempt + 1);
-      }
-      
-      return email;
-    };
+    // Check if student ID already exists (just in case)
+    let duplicateCheck = await Student.findOne({ studentId });
+    let attempts = 0;
+    while (duplicateCheck && attempts < 10) {
+      sequence += 1;
+      studentId = `${course.courseCode}${year}${month}${sequence.toString().padStart(3, '0')}`;
+      duplicateCheck = await Student.findOne({ studentId });
+      attempts++;
+    }
 
-    const instituteEmail = await generateUniqueInstituteEmail(firstName, lastName, studentId);
+    // Generate institute email
+    const firstNameClean = firstName.toLowerCase().replace(/[^a-z]/g, '');
+    const lastNameClean = lastName.toLowerCase().replace(/[^a-z]/g, '');
+    const instituteEmail = `${firstNameClean}.${lastNameClean}.${studentId.slice(-3)}@nursinginstitute.edu`.toLowerCase();
+
     console.log('📧 Generated Institute Email:', instituteEmail);
 
-    // Check if personal email already exists
-    const existingPersonalEmail = await Student.findOne({ personalEmail });
-    if (existingPersonalEmail) {
-      return res.status(400).json({
-        success: false,
-        message: `Student with email ${personalEmail} already exists`,
-        existingStudentId: existingPersonalEmail.studentId
-      });
-    }
-
-    // Check if mobile number already exists
-    const existingMobile = await Student.findOne({ mobileNumber });
-    if (existingMobile) {
-      return res.status(400).json({
-        success: false,
-        message: `Student with mobile number ${mobileNumber} already exists`,
-        existingStudentId: existingMobile.studentId
-      });
-    }
-
-    // Generate password
+    // Generate strong password
     const generatePassword = () => {
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+      const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const lower = 'abcdefghijklmnopqrstuvwxyz';
+      const numbers = '0123456789';
+      const symbols = '!@#$%^&*';
+      
       let password = '';
-      for (let i = 0; i < 12; i++) {
-        password += chars.charAt(Math.floor(Math.random() * chars.length));
+      password += upper[Math.floor(Math.random() * upper.length)];
+      password += lower[Math.floor(Math.random() * lower.length)];
+      password += numbers[Math.floor(Math.random() * numbers.length)];
+      password += symbols[Math.floor(Math.random() * symbols.length)];
+      
+      const allChars = upper + lower + numbers + symbols;
+      for (let i = 4; i < 12; i++) {
+        password += allChars[Math.floor(Math.random() * allChars.length)];
       }
-      return password;
+      
+      return password.split('').sort(() => Math.random() - 0.5).join('');
     };
-    
+
     const password = generatePassword();
+    console.log('🔐 Generated Password:', password);
 
-    // Hash password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    // Check if username (studentId) already exists in User collection
+    let existingUser = await User.findOne({ username: studentId });
+    if (existingUser) {
+      // Generate new student ID if username exists
+      sequence += 1;
+      studentId = `${course.courseCode}${year}${month}${sequence.toString().padStart(3, '0')}`;
+      console.log('🔄 Regenerated Student ID due to duplicate username:', studentId);
+    }
 
-    // Create User Account
+    // Create user account
     const user = new User({
       username: studentId,
       email: instituteEmail,
-      password: hashedPassword,
+      password: password,
       role: 'student',
-      isActive: true
+      isActive: true,
+      profileImage: ''
     });
-    
-    await user.save();
-    console.log('✅ User account created:', user._id);
 
-    // Create Student Profile
+    await user.save({ session });
+    console.log('✅ User created:', user._id);
+
+    // Create student profile
     const student = new Student({
       userId: user._id,
       studentId: studentId,
       firstName: firstName,
       lastName: lastName,
       fullName: `${firstName} ${lastName}`,
-      personalEmail: personalEmail,
+      personalEmail: personalEmail.toLowerCase(),
       instituteEmail: instituteEmail,
       mobileNumber: mobileNumber,
+      alternateMobile: alternateMobile || '',
+      whatsappNumber: whatsappNumber || '',
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-      gender: gender || 'Other',
+      gender: gender || 'Male',
       bloodGroup: bloodGroup || '',
-      alternateContact: req.body.alternateMobile || '',
-      whatsappNumber: req.body.whatsappNumber || '',
       
-      // Address
-      address: {
-        street: permanentAddress?.addressLine1 || '',
-        city: permanentAddress?.city || '',
-        state: permanentAddress?.state || '',
-        pincode: permanentAddress?.pincode || '',
-        country: permanentAddress?.country || 'India'
+      permanentAddress: permanentAddress || {
+        addressLine1: '',
+        addressLine2: '',
+        city: '',
+        state: '',
+        pincode: '',
+        country: 'India'
       },
       
-      correspondenceAddress: correspondenceAddress?.sameAsPermanent ? null : {
-        street: correspondenceAddress?.addressLine1 || '',
-        city: correspondenceAddress?.city || '',
-        state: correspondenceAddress?.state || '',
-        pincode: correspondenceAddress?.pincode || ''
+      correspondenceAddress: correspondenceAddress || {
+        addressLine1: '',
+        addressLine2: '',
+        city: '',
+        state: '',
+        pincode: '',
+        sameAsPermanent: true
       },
       
-      // Guardian Details
-      guardianDetails: {
-        fatherName: fatherName || '',
-        fatherOccupation: req.body.fatherOccupation || '',
-        fatherContact: fatherMobile || '',
-        motherName: motherName || '',
-        motherOccupation: req.body.motherOccupation || '',
-        motherContact: motherMobile || '',
-        guardianName: req.body.guardianName || '',
-        guardianRelation: req.body.guardianRelation || '',
-        guardianContact: req.body.guardianMobile || ''
-      },
+      fatherName: fatherName,
+      fatherOccupation: '',
+      fatherMobile: fatherMobile,
+      motherName: '',
+      motherOccupation: '',
+      motherMobile: '',
+      guardianName: '',
+      guardianRelation: '',
+      guardianMobile: '',
       
-      // Academic Details
-      courseEnrolled: courseEnrolled,
-      admissionYear: new Date().getFullYear(),
+      courseEnrolled: course._id,
+      admissionYear: year,
       admissionType: admissionType || 'Regular',
       admissionQuota: admissionQuota || 'General',
-      semester: parseInt(semester) || 1,
+      semester: semester || 1,
       rollNumber: rollNumber || '',
-      admissionDate: new Date(),
       
-      // Previous Education
-      previousEducation: {
-        qualification: qualification || '12th',
-        boardUniversity: boardUniversity || '',
-        passingYear: passingYear || '',
-        percentage: percentage || '',
-        schoolCollege: schoolCollege || ''
-      },
+      qualification: qualification || '',
+      boardUniversity: boardUniversity || '',
+      passingYear: passingYear || '',
+      percentage: percentage || '',
+      schoolCollege: schoolCollege || '',
       
-      // Facilities
-      hostelAllotted: requireHostel || false,
-      transportFacility: requireTransport || false,
+      requireHostel: requireHostel || false,
+      requireTransport: requireTransport || false,
+      hostelType: hostelType || '',
+      transportRoute: transportRoute || '',
       
-      // Documents
-      documents: documents ? Object.entries(documents).map(([type, submitted]) => ({
-        documentType: type,
-        documentName: `${type.charAt(0).toUpperCase() + type.slice(1)} Certificate`,
-        documentUrl: submitted ? `/uploads/documents/${studentId}_${type}.pdf` : '',
-        uploadedAt: submitted ? new Date() : null,
-        verified: false
-      })) : [],
+      documents: documents || {},
       
-      // Status
       academicStatus: 'Active',
+      admissionDate: new Date(),
       attendancePercentage: 0,
-      cgpa: 0,
-      
-      // Fees
-      fees: {
-        totalFees: course.feesStructure?.totalFee || 50000,
-        feesPaid: 0,
-        pendingFees: course.feesStructure?.totalFee || 50000,
-        lastPaymentDate: null
-      }
+      cgpa: 0
     });
 
-    await student.save();
-    console.log('✅ Student profile created:', student._id);
+    await student.save({ session });
+    console.log('✅ Student created:', student._id);
 
-    // Send welcome email
+    // Update course seats
+    course.seatsFilled = (course.seatsFilled || 0) + 1;
+    await course.save({ session });
+
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+
+    console.log('✅ Transaction committed successfully');
+
+    // Send email with credentials (optional - run outside transaction)
     try {
-      await sendStudentCredentials({
-        studentName: `${firstName} ${lastName}`,
-        personalEmail: personalEmail,
-        instituteEmail: instituteEmail,
-        studentId: studentId,
-        password: password
+      const nodemailer = require('nodemailer');
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.EMAIL_USER,
+          pass: process.env.EMAIL_PASS
+        }
       });
+
+      const mailOptions = {
+        from: `"Nursing Institute" <${process.env.EMAIL_USER}>`,
+        to: personalEmail,
+        subject: 'Welcome to Nursing Institute - Your Login Credentials',
+        html: `
+          <h2>Welcome ${firstName} ${lastName}!</h2>
+          <p>Your admission to Nursing Institute has been processed successfully.</p>
+          <h3>Your Login Credentials:</h3>
+          <ul>
+            <li><strong>Student ID:</strong> ${studentId}</li>
+            <li><strong>Institute Email:</strong> ${instituteEmail}</li>
+            <li><strong>Password:</strong> ${password}</li>
+            <li><strong>Login URL:</strong> ${process.env.FRONTEND_URL || 'http://localhost:3000'}/login</li>
+          </ul>
+          <p><strong>Important:</strong> Change your password after first login.</p>
+          <p>Best regards,<br>Nursing Institute Administration</p>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
       console.log('📧 Welcome email sent');
     } catch (emailError) {
-      console.log('⚠️ Email failed but student created:', emailError.message);
+      console.log('Email sending failed, but student created:', emailError.message);
     }
 
     res.status(201).json({
@@ -1095,24 +1502,32 @@ exports.addStudent = async (req, res) => {
           personalEmail: personalEmail,
           instituteEmail: instituteEmail,
           course: course.courseName,
-          admissionDate: student.admissionDate
+          mobileNumber: mobileNumber
         },
         credentials: {
           studentId: studentId,
           instituteEmail: instituteEmail,
           password: password,
-          loginUrl: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/login`,
-          note: 'Please change password on first login'
+          note: 'Password must be changed on first login'
         }
       }
     });
 
   } catch (error) {
-    console.error('❌ Add Student Error:', error);
+    // Abort transaction on error
+    await session.abortTransaction();
+    session.endSession();
     
-    // Clean up if student creation failed but user was created
-    if (req.body.studentId) {
-      await User.findOneAndDelete({ username: req.body.studentId });
+    console.error('❌ Add Student Error:', error);
+    console.error('Error Stack:', error.stack);
+    
+    // If it's a duplicate key error, provide specific message
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Duplicate entry found. Please try again with different details.',
+        error: error.keyValue
+      });
     }
     
     res.status(500).json({
@@ -1121,8 +1536,7 @@ exports.addStudent = async (req, res) => {
       error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
-};
-// Helper: Send student credentials email (UPDATED)
+};// Helper: Send student credentials email (UPDATED)
 const sendStudentCredentials = async ({ studentName, personalEmail, instituteEmail, studentId, password }) => {
   try {
     const transporter = nodemailer.createTransport({
