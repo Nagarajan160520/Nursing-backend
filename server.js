@@ -558,6 +558,7 @@ app.get('/api/faculty/search', facultyController.searchFaculty);
 // GALLERY ROUTES
 // ================
 app.get('/api/gallery', galleryController.getAllGallery);
+app.get('/api/gallery/featured', galleryController.getFeaturedGallery);
 app.get('/api/gallery/:id', galleryController.getGalleryItem);
 app.post('/api/gallery', auth, isAdmin, upload.single('image'), galleryController.createGalleryItem);
 app.put('/api/gallery/:id', auth, isAdmin, upload.single('image'), galleryController.updateGalleryItem);
@@ -567,7 +568,6 @@ app.post('/api/gallery/:id/comments', auth, galleryController.addComment);
 app.get('/api/gallery/albums', galleryController.getGalleryAlbums);
 app.get('/api/gallery/album/:album', galleryController.getGalleryByAlbum);
 app.get('/api/gallery/category/:category', galleryController.getGalleryByCategory);
-app.get('/api/gallery/featured', galleryController.getFeaturedGallery);
 app.get('/api/gallery/stats', auth, isAdmin, galleryController.getGalleryStats);
 app.get('/api/gallery/search', galleryController.searchGallery);
 
