@@ -32,14 +32,16 @@ router.delete('/news/:id', adminController.deleteNews);
 // ✅ **CRITICAL - Student Management Routes MUST be added:**
 router.post('/students', adminController.addStudent);
 router.get('/students', adminController.getAllStudents);
-router.get('/students/:id', adminController.getStudentDetails);
-router.put('/students/:id', adminController.updateStudent);
-router.delete('/students/:id', adminController.deleteStudent);
 
 // ✅ **Essential Validation Routes:**
 router.get('/students/check-email', adminController.checkEmail);
 router.get('/students/check-mobile', adminController.checkMobile);
 router.get('/students/count', adminController.getStudentCount);
+
+// Parameterized routes after specific ones
+router.get('/students/:id', adminController.getStudentDetails);
+router.put('/students/:id', adminController.updateStudent);
+router.delete('/students/:id', adminController.deleteStudent);
 
 // ✅ **Add these as well:**
 router.post('/students/bulk-upload', upload.single('file'), adminController.bulkUploadStudents);

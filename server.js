@@ -464,6 +464,13 @@ app.put('/api/admin/events/:id', auth, isAdmin, eventsController.updateEvent);
 app.delete('/api/admin/events/:id', auth, isAdmin, eventsController.deleteEvent);
 app.post('/api/admin/students', auth, isAdmin, adminController.addStudent);
 app.get('/api/admin/students', auth, isAdmin, adminController.getAllStudents);
+
+// Essential validation routes (must come before parameterized routes)
+app.get('/api/admin/students/check-email', auth, isAdmin, adminController.checkEmail);
+app.get('/api/admin/students/check-mobile', auth, isAdmin, adminController.checkMobile);
+app.get('/api/admin/students/count', auth, isAdmin, adminController.getStudentCount);
+
+// Parameterized routes after specific ones
 app.get('/api/admin/students/:id', auth, isAdmin, adminController.getStudentDetails);
 app.put('/api/admin/students/:id', auth, isAdmin, adminController.updateStudent);
 app.delete('/api/admin/students/:id', auth, isAdmin, adminController.deleteStudent);

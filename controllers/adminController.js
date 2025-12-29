@@ -759,55 +759,7 @@ const generateStudentId = async (batchYear, courseCode) => {
     return `${courseCode}-${batchYear}-${Date.now().toString().slice(-3)}`;
   }
 };
-// @desc    Check if email already exists
-// @route   GET /api/admin/students/check-email
-// @access  Private (Admin)
-exports.checkEmailExists = async (req, res) => {
-  try {
-    const { email } = req.query;
-    
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email parameter is required'
-      });
-    }
 
-    const student = await Student.findOne({ 
-      $or: [
-        { personalEmail: email.toLowerCase() },
-        { instituteEmail: email.toLowerCase() }
-      ]
-    });
-
-    if (student) {
-      return res.json({
-        success: true,
-        exists: true,
-        studentId: student.studentId,
-        fullName: student.fullName
-      });
-    }
-
-    // Also check in User collection
-    const user = await User.findOne({ 
-      email: email.toLowerCase() 
-    });
-
-    res.json({
-      success: true,
-      exists: !!user,
-      message: user ? 'Email exists in user accounts' : 'Email is available'
-    });
-
-  } catch (error) {
-    console.error('Check Email Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to check email'
-    });
-  }
-};
 // ✅ **ADD THESE FUNCTIONS AT THE BEGINNING OF YOUR adminController.js:**
 
 // @desc    Check if email exists
@@ -1348,6 +1300,7 @@ exports.addStudent = async (req, res) => {
     const student = new Student({
       userId: user._id,
       studentId: studentId,
+      admissionNumber: studentId, // Set admissionNumber same as studentId
       firstName: firstName,
       lastName: lastName,
       personalEmail: personalEmail.toLowerCase(),

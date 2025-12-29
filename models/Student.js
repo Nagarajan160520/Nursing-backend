@@ -14,6 +14,13 @@ const studentSchema = new mongoose.Schema({
     uppercase: true,
     trim: true
   },
+  admissionNumber: { // Unique admission number, same as studentId for now
+    type: String,
+    unique: true,
+    sparse: true, // Allows multiple null values
+    uppercase: true,
+    trim: true
+  },
   rollNumber: {
     type: String,
     trim: true,
@@ -31,7 +38,7 @@ const studentSchema = new mongoose.Schema({
   },
   dateOfBirth: {
     type: Date,
-    required: true
+    required: false
   },
   gender: {
     type: String,
