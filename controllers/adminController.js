@@ -2062,9 +2062,8 @@ exports.resetStudentPassword = async (req, res) => {
     // Generate password if not provided
     const password = newPassword || generateRandomPassword();
 
-    // Update password
-    const salt = await bcrypt.genSalt(10);
-    user.password = await bcrypt.hash(password, salt);
+    // Update password (let the User model pre-save hook handle hashing)
+    user.password = password;
     await user.save();
 
     // Send email if requested

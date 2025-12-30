@@ -474,6 +474,7 @@ app.get('/api/admin/students/count', auth, isAdmin, adminController.getStudentCo
 app.get('/api/admin/students/:id', auth, isAdmin, adminController.getStudentDetails);
 app.put('/api/admin/students/:id', auth, isAdmin, adminController.updateStudent);
 app.delete('/api/admin/students/:id', auth, isAdmin, adminController.deleteStudent);
+app.post('/api/admin/students/:id/reset-password', auth, isAdmin, adminController.resetStudentPassword);
 app.post('/api/admin/students/bulk-upload', auth, isAdmin, upload.single('file'), adminController.bulkUploadStudents);
 app.post('/api/admin/attendance', auth, isAdmin, adminController.manageAttendance);
 app.post('/api/admin/marks', auth, isAdmin, adminController.manageMarks);
