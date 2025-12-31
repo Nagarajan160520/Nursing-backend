@@ -28,6 +28,7 @@ const galleryController = require('./controllers/galleryController');
 const newsController = require('./controllers/newsController');
 const placementController = require('./controllers/placementController');
 const eventsController = require('./controllers/eventsController');
+const userController = require('./controllers/userController');
 
 // Import middleware
 const { auth, isAdmin, isStudent, isFaculty } = require('./middleware/auth');
@@ -483,6 +484,15 @@ app.post('/api/admin/downloads', auth, isAdmin, upload.single('file'), adminCont
 app.get('/api/admin/downloads', auth, isAdmin, adminController.getAllDownloads);
 app.put('/api/admin/downloads/:id', auth, isAdmin, adminController.updateDownload);
 app.delete('/api/admin/downloads/:id', auth, isAdmin, adminController.deleteDownload);
+
+// User Management Routes
+app.get('/api/admin/users', auth, isAdmin, userController.getAllUsers);
+app.get('/api/admin/users/:id', auth, isAdmin, userController.getUserById);
+app.post('/api/admin/users', auth, isAdmin, userController.createUser);
+app.put('/api/admin/users/:id', auth, isAdmin, userController.updateUser);
+app.delete('/api/admin/users/:id', auth, isAdmin, userController.deleteUser);
+app.patch('/api/admin/users/:id/toggle-active', auth, isAdmin, userController.toggleUserActive);
+app.post('/api/admin/users/:id/reset-password', auth, isAdmin, userController.resetUserPassword);
 
 // ================
 // STUDENT ROUTES
