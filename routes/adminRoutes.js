@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
+const userController = require('../controllers/userController');
 const { auth, isAdmin } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 
@@ -22,6 +23,15 @@ router.post('/gallery', upload.single('image'), adminController.uploadGallery);
 router.get('/gallery', adminController.getAllGallery);
 router.put('/gallery/:id', adminController.updateGallery);
 router.delete('/gallery/:id', adminController.deleteGallery);
+
+// User Management Routes
+router.get('/users', userController.getAllUsers);
+router.get('/users/:id', userController.getUserById);
+router.post('/users', userController.createUser);
+router.put('/users/:id', userController.updateUser);
+router.delete('/users/:id', userController.deleteUser);
+router.post('/users/:id/reset-password', userController.resetUserPassword);
+router.patch('/users/:id/toggle-active', userController.toggleUserActive);
 
 // News Management
 router.post('/news', upload.array('attachments', 5), adminController.addNews);
