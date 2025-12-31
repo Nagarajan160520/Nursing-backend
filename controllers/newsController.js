@@ -14,7 +14,7 @@ exports.getAllNews = async (req, res) => {
     const query = { 
       isPublished: true,
       $or: [
-        { expiryDate: { $exists: false } },
+        { expiryDate: { $exists: false } }, 
         { expiryDate: { $gt: new Date() } }
       ]
     };
@@ -24,7 +24,7 @@ exports.getAllNews = async (req, res) => {
     }
     
     if (search) {
-      query.$or = [
+      query.$or = [ 
         { title: { $regex: search, $options: 'i' } },
         { content: { $regex: search, $options: 'i' } },
         { tags: { $regex: search, $options: 'i' } }

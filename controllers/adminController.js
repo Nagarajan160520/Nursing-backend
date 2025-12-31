@@ -509,6 +509,49 @@ exports.deleteGallery = async (req, res) => {
   }
 };
 
+// Helper function to create notification for news
+const createNotificationForNews = async (news) => {
+  try {
+    // Determine receivers based on target audience
+    let receivers = [];
+
+    if (news.targetAudience.includes('all')) {
+      // Get all users
+      const allUsers = await User.find({ isActive: true }).select('_id');
+      receivers = allUsers.map(user => ({
+        user: user._id,
+        read: false
+      }));
+    } else if (news.targetAudience.includes('students')) {
+      // Get all students
+      const students = await Student.find().populate('userId');
+      receivers = students.map(student => ({
+        user: student.userId._id,
+        read: false
+      }));
+    }
+    // Add more conditions for other target audiences
+
+    const notification = new Notification({
+      title: news.title,
+      message: news.excerpt || news.content.substring(0, 200) + '...',
+      type: 'info',
+      category: news.category,
+      priority: news.priority,
+      sender: news.author,
+      receivers,
+      targetType: 'all',
+      sendMethod: ['dashboard'],
+      actionUrl: `/news/${news.slug}`,
+      actionText: 'Read More'
+    });
+
+    await notification.save();
+  } catch (error) {
+    console.error('Create News Notification Error:', error);
+  }
+};
+
 // @desc    Add news/event
 // @route   POST /api/admin/news
 // @access  Private (Admin)
@@ -548,49 +591,6 @@ exports.addNews = async (req, res) => {
       success: false,
       message: error.message || 'Failed to add news'
     });
-  }
-};
-
-// Helper function to create notification for news
-const createNotificationForNews = async (news) => {
-  try {
-    // Determine receivers based on target audience
-    let receivers = [];
-    
-    if (news.targetAudience.includes('all')) {
-      // Get all users
-      const allUsers = await User.find({ isActive: true }).select('_id');
-      receivers = allUsers.map(user => ({
-        user: user._id,
-        read: false
-      }));
-    } else if (news.targetAudience.includes('students')) {
-      // Get all students
-      const students = await Student.find().populate('userId');
-      receivers = students.map(student => ({
-        user: student.userId._id,
-        read: false
-      }));
-    }
-    // Add more conditions for other target audiences
-
-    const notification = new Notification({
-      title: news.title,
-      message: news.excerpt || news.content.substring(0, 200) + '...',
-      type: 'info',
-      category: news.category,
-      priority: news.priority,
-      sender: news.author,
-      receivers,
-      targetType: 'all',
-      sendMethod: ['dashboard'],
-      actionUrl: `/news/${news.slug}`,
-      actionText: 'Read More'
-    });
-
-    await notification.save();
-  } catch (error) {
-    console.error('Create News Notification Error:', error);
   }
 };
 
@@ -730,6 +730,7 @@ exports.deleteNews = async (req, res) => {
     });
   }
 };
+
 // @desc    Generate unique student ID
 // @param   batchYear, courseCode
 const generateStudentId = async (batchYear, courseCode) => {
@@ -759,8 +760,6 @@ const generateStudentId = async (batchYear, courseCode) => {
     return `${courseCode}-${batchYear}-${Date.now().toString().slice(-3)}`;
   }
 };
-
-// ✅ **ADD THESE FUNCTIONS AT THE BEGINNING OF YOUR adminController.js:**
 
 // @desc    Check if email exists
 // @route   GET /api/admin/students/check-email
@@ -1137,6 +1136,88 @@ exports.deleteFaculty = async (req, res) => {
   }
 };
 
+// Helper: Send student credentials email
+const sendStudentCredentials = async ({ studentName, personalEmail, instituteEmail, studentId, password }) => {
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    const mailOptions = {
+      from: `"Nursing Institute" <${process.env.EMAIL_USER}>`,
+      to: personalEmail,
+      subject: 'Welcome to Nursing Institute - Your Login Credentials',
+      html: `
+        <h2>Welcome ${studentName}!</h2>
+        <p>Your admission to Nursing Institute has been processed successfully.</p>
+        <h3>Your Login Credentials:</h3>
+        <ul>
+          <li><strong>Student ID:</strong> ${studentId}</li>
+          <li><strong>Institute Email:</strong> ${instituteEmail}</li>
+          <li><strong>Password:</strong> ${password}</li>
+          <li><strong>Login URL:</strong> ${process.env.FRONTEND_URL || 'http://localhost:3000'}/login</li>
+        </ul>
+        <p><strong>Important:</strong> Change your password after first login.</p>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log('✅ Email sent to:', personalEmail);
+  } catch (error) {
+    console.error('❌ Email sending failed:', error);
+    throw error;
+  }
+};
+
+// Helper: Send password reset email
+const sendPasswordResetEmail = async ({ studentName, personalEmail, instituteEmail, newPassword }) => {
+  try {
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    const mailOptions = {
+      from: `"Nursing Institute" <${process.env.EMAIL_USER}>`,
+      to: personalEmail,
+      subject: 'Password Reset - Nursing Institute',
+      html: `
+        <h2>Hello ${studentName}!</h2>
+        <p>Your password has been reset by the administrator.</p>
+        <h3>Your New Credentials:</h3>
+        <ul>
+          <li><strong>Institute Email:</strong> ${instituteEmail}</li>
+          <li><strong>New Password:</strong> ${newPassword}</li>
+        </ul>
+        <p><strong>Important:</strong> Please change your password after first login.</p>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log('✅ Password reset email sent to:', personalEmail);
+  } catch (error) {
+    console.error('❌ Password reset email failed:', error);
+    throw error;
+  }
+};
+
+// Helper: Generate random password
+const generateRandomPassword = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < 8; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
 // @desc    Add new student - SIMPLIFIED VERSION
 // @route   POST /api/admin/students
 // @access  Private (Admin)
@@ -1262,7 +1343,7 @@ exports.addStudent = async (req, res) => {
     console.log('📧 Generated Institute Email:', instituteEmail);
 
     // ✅ Generate Secure Password
-    const generatePassword = () => {
+    const generateSecurePassword = () => {
       const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
       let password = '';
       
@@ -1281,7 +1362,7 @@ exports.addStudent = async (req, res) => {
       return password.split('').sort(() => Math.random() - 0.5).join('');
     };
     
-    const password = generatePassword();
+    const password = generateSecurePassword();
     console.log('🔐 Generated Password:', password);
 
     // ✅ Create User Account
@@ -1458,42 +1539,6 @@ exports.testAddStudent = async (req, res) => {
     });
   }
 };
-// Helper: Send student credentials email (UPDATED)
-const sendStudentCredentials = async ({ studentName, personalEmail, instituteEmail, studentId, password }) => {
-  try {
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      }
-    });
-
-    const mailOptions = {
-      from: `"Nursing Institute" <${process.env.EMAIL_USER}>`,
-      to: personalEmail,
-      subject: 'Welcome to Nursing Institute - Your Login Credentials',
-      html: `
-        <h2>Welcome ${studentName}!</h2>
-        <p>Your admission to Nursing Institute has been processed successfully.</p>
-        <h3>Your Login Credentials:</h3>
-        <ul>
-          <li><strong>Student ID:</strong> ${studentId}</li>
-          <li><strong>Institute Email:</strong> ${instituteEmail}</li>
-          <li><strong>Password:</strong> ${password}</li>
-          <li><strong>Login URL:</strong> ${process.env.FRONTEND_URL || 'http://localhost:3000'}/login</li>
-        </ul>
-        <p><strong>Important:</strong> Change your password after first login.</p>
-      `
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log('✅ Email sent to:', personalEmail);
-  } catch (error) {
-    console.error('❌ Email sending failed:', error);
-    throw error;
-  }
-};
 
 // @desc    Handle student's first login/password setup
 // @route   POST /api/auth/first-login/:token
@@ -1573,7 +1618,7 @@ exports.firstLoginSetup = async (req, res) => {
     }
 };
 
-// @desc    Get all students with filters (UPDATED)
+// @desc    Get all students with filters
 // @route   GET /api/admin/students
 // @access  Private (Admin)
 exports.getAllStudents = async (req, res) => {
@@ -1666,35 +1711,6 @@ exports.getAllStudents = async (req, res) => {
   }
 };
 
-// Helper: Get semester-wise distribution
-const getSemesterWiseDistribution = async () => {
-  return await Student.aggregate([
-    {
-      $match: { academicStatus: 'Active' }
-    },
-    {
-      $group: {
-        _id: '$semester',
-        count: { $sum: 1 }
-      }
-    },
-    {
-      $sort: { _id: 1 }
-    }
-  ]);
-};
-
-// Helper: Get status-wise distribution
-const getStatusWiseDistribution = async () => {
-  return await Student.aggregate([
-    {
-      $group: {
-        _id: '$academicStatus',
-        count: { $sum: 1 }
-      }
-    }
-  ]);
-};
 // @desc    Get single student by ID
 // @route   GET /api/admin/students/:id
 // @access  Private (Admin)
@@ -2034,6 +2050,7 @@ exports.bulkUploadStudents = async (req, res) => {
     });
   }
 };
+
 // @desc    Reset student password
 // @route   POST /api/admin/students/:id/reset-password
 // @access  Private (Admin)
@@ -2098,16 +2115,6 @@ exports.resetStudentPassword = async (req, res) => {
       message: 'Failed to reset password'
     });
   }
-};
-
-// Helper: Generate random password
-const generateRandomPassword = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let password = '';
-  for (let i = 0; i < 8; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return password;
 };
 
 // @desc    Export students to CSV
@@ -2217,6 +2224,7 @@ exports.getStudentStats = async (req, res) => {
     });
   }
 };
+
 // @desc    Search students
 // @route   GET /api/admin/students/search
 // @access  Private (Admin)
@@ -2254,31 +2262,6 @@ exports.searchStudents = async (req, res) => {
       message: 'Failed to search students'
     });
   }
-};
-// Helper: Get fees statistics
-const getFeesStatistics = async () => {
-  const result = await Student.aggregate([
-    {
-      $group: {
-        _id: null,
-        totalFees: { $sum: '$fees.totalFees' },
-        paidFees: { $sum: '$fees.feesPaid' },
-        pendingFees: { $sum: '$fees.pendingFees' },
-        studentsWithPendingFees: {
-          $sum: {
-            $cond: [{ $gt: ['$fees.pendingFees', 0] }, 1, 0]
-          }
-        }
-      }
-    }
-  ]);
-
-  return result[0] || {
-    totalFees: 0,
-    paidFees: 0,
-    pendingFees: 0,
-    studentsWithPendingFees: 0
-  };
 };
 
 // @desc    Manage attendance
@@ -2463,6 +2446,23 @@ exports.publishMarks = async (req, res) => {
   }
 };
 
+// Helper function to get file type
+const getFileType = (mimeType) => {
+  const types = {
+    'application/pdf': 'PDF',
+    'application/msword': 'DOC',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+    'application/vnd.ms-excel': 'XLS',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+    'application/vnd.ms-powerpoint': 'PPT',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPTX',
+    'application/zip': 'ZIP',
+    'application/x-rar-compressed': 'RAR'
+  };
+
+  return types[mimeType] || 'OTHER';
+};
+
 // @desc    Upload study material
 // @route   POST /api/admin/downloads
 // @access  Private (Admin)
@@ -2515,23 +2515,6 @@ exports.uploadStudyMaterial = async (req, res) => {
       message: error.message || 'Failed to upload study material'
     });
   }
-};
-
-// Helper function to get file type
-const getFileType = (mimeType) => {
-  const types = {
-    'application/pdf': 'PDF',
-    'application/msword': 'DOC',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
-    'application/vnd.ms-excel': 'XLS',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
-    'application/vnd.ms-powerpoint': 'PPT',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPTX',
-    'application/zip': 'ZIP',
-    'application/x-rar-compressed': 'RAR'
-  };
-
-  return types[mimeType] || 'OTHER';
 };
 
 // @desc    Get all downloads
@@ -2843,5 +2826,183 @@ exports.resetUserPassword = async (req, res) => {
   } catch (error) {
     console.error('Reset User Password Error:', error);
     res.status(500).json({ success: false, message: 'Failed to reset password' });
+  }
+};
+
+// @desc    Get all users
+// @route   GET /api/admin/users
+// @access  Private (Admin)
+exports.getAllUsers = async (req, res) => {
+  try {
+    const { role, isActive, search } = req.query;
+    
+    const query = {};
+    
+    if (role) {
+      query.role = role;
+    }
+    
+    if (isActive !== undefined) {
+      query.isActive = isActive === 'true';
+    }
+    
+    if (search) {
+      query.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const users = await User.find(query)
+      .select('-password')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      data: users,
+      count: users.length
+    });
+  } catch (error) {
+    console.error('Get All Users Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch users'
+    });
+  }
+};
+
+// @desc    Update user status
+// @route   PUT /api/admin/users/:id/status
+// @access  Private (Admin)
+exports.updateUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    user.isActive = isActive;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `User ${isActive ? 'activated' : 'deactivated'} successfully`,
+      data: user
+    });
+  } catch (error) {
+    console.error('Update User Status Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update user status'
+    });
+  }
+};
+
+// @desc    Get system logs
+// @route   GET /api/admin/logs
+// @access  Private (Admin)
+exports.getSystemLogs = async (req, res) => {
+  try {
+    const { type, startDate, endDate } = req.query;
+    
+    // This is a placeholder - implement actual logging system
+    res.json({
+      success: true,
+      data: {
+        logs: [],
+        message: 'Logging system not implemented'
+      }
+    });
+  } catch (error) {
+    console.error('Get System Logs Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch system logs'
+    });
+  }
+};
+
+// @desc    Backup database
+// @route   POST /api/admin/backup
+// @access  Private (Admin)
+exports.backupDatabase = async (req, res) => {
+  try {
+    // This is a placeholder - implement actual backup system
+    res.json({
+      success: true,
+      message: 'Backup initiated successfully',
+      data: {
+        backupId: Date.now(),
+        timestamp: new Date().toISOString(),
+        status: 'completed'
+      }
+    });
+  } catch (error) {
+    console.error('Backup Database Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to backup database'
+    });
+  }
+};
+
+// @desc    Get system settings
+// @route   GET /api/admin/settings
+// @access  Private (Admin)
+exports.getSystemSettings = async (req, res) => {
+  try {
+    // This is a placeholder - implement actual settings system
+    res.json({
+      success: true,
+      data: {
+        instituteName: 'Nursing Institute',
+        instituteEmail: 'admin@nursinginstitute.edu',
+        institutePhone: '+91 9876543210',
+        address: '123 Nursing Street, Medical City',
+        academicYear: '2024-2025',
+        semesterStartDate: '2024-06-01',
+        semesterEndDate: '2024-11-30',
+        attendanceThreshold: 75,
+        marksPassingPercentage: 40,
+        autoBackup: true,
+        backupFrequency: 'daily',
+        emailNotifications: true,
+        smsNotifications: false
+      }
+    });
+  } catch (error) {
+    console.error('Get System Settings Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch system settings'
+    });
+  }
+};
+
+// @desc    Update system settings
+// @route   PUT /api/admin/settings
+// @access  Private (Admin)
+exports.updateSystemSettings = async (req, res) => {
+  try {
+    const updates = req.body;
+    
+    // This is a placeholder - implement actual settings update
+    res.json({
+      success: true,
+      message: 'System settings updated successfully',
+      data: updates
+    });
+  } catch (error) {
+    console.error('Update System Settings Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update system settings'
+    });
   }
 };

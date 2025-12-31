@@ -60,8 +60,7 @@ router.post('/students/:id/reset-password', adminController.resetStudentPassword
 router.post('/students/:id/create-user', adminController.createUserForStudent);
 router.post('/students/create-missing-users', adminController.createUsersForMissingStudents);
 
-// Reset user password by user id
-router.post('/users/:id/reset-password', adminController.resetUserPassword);
+
 
 // ✅ **ADD FACULTY ROUTES:**
 router.post('/faculty', adminController.addFaculty);
@@ -70,11 +69,11 @@ router.get('/faculty/:id', adminController.getFacultyById);
 router.put('/faculty/:id', adminController.updateFaculty);
 router.delete('/faculty/:id', adminController.deleteFaculty);
 
-// Attendance Management
-router.post('/attendance', adminController.markAttendance);
-router.get('/attendance', adminController.getAttendance);
-router.get('/attendance/report', adminController.generateAttendanceReport);
-router.post('/attendance/bulk', upload.single('file'), adminController.bulkUploadAttendance);
+// Attendance Management - TODO: Implement these functions
+// router.post('/attendance', adminController.markAttendance);
+// router.get('/attendance', adminController.getAttendance);
+// router.get('/attendance/report', adminController.generateAttendanceReport);
+// router.post('/attendance/bulk', upload.single('file'), adminController.bulkUploadAttendance);
 
 // Marks Management
 router.post('/marks', adminController.manageMarks);
@@ -86,11 +85,11 @@ router.get('/downloads', adminController.getAllDownloads);
 router.put('/downloads/:id', adminController.updateDownload);
 router.delete('/downloads/:id', adminController.deleteDownload);
 
-// Settings Management
-router.get('/settings', adminController.getSettings);
-router.put('/settings', adminController.updateSettings);
-router.post('/settings/reset', adminController.resetSettings);
-router.post('/clear-cache', adminController.clearCache);
-router.get('/system-check', adminController.systemCheck);
+// Settings Management - TODO: Implement these functions
+// router.get('/settings', adminController.getSettings);
+// router.put('/settings', adminController.updateSettings);
+// router.post('/settings/reset', adminController.resetSettings);
+// router.post('/clear-cache', adminController.clearCache);
+// router.get('/system-check', adminController.systemCheck);
 
-module.exports = router;
+module.exports = router; 

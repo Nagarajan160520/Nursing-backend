@@ -30,11 +30,14 @@ const placementController = require('./controllers/placementController');
 const eventsController = require('./controllers/eventsController');
 const userController = require('./controllers/userController');
 
+// Import routes
+const adminRoutes = require('./routes/adminRoutes');
+
 // Import middleware
 const { auth, isAdmin, isStudent, isFaculty } = require('./middleware/auth');
 const upload = require('./middleware/upload');
 
-const app = express();
+const app = express(); 
 
 // ====================
 // SECURITY MIDDLEWARE
@@ -444,6 +447,9 @@ app.post('/api/auth/logout', auth, authController.logout);
 // ================
 // ADMIN ROUTES
 // ================
+// Mount admin routes
+app.use('/api/admin', adminRoutes);
+
 app.get('/api/admin/dashboard/stats', auth, isAdmin, adminController.getDashboardStats);
 app.post('/api/admin/courses', auth, isAdmin, adminController.addCourse);
 app.get('/api/admin/courses', auth, isAdmin, adminController.getAllCourses);
@@ -475,7 +481,6 @@ app.get('/api/admin/students/count', auth, isAdmin, adminController.getStudentCo
 app.get('/api/admin/students/:id', auth, isAdmin, adminController.getStudentDetails);
 app.put('/api/admin/students/:id', auth, isAdmin, adminController.updateStudent);
 app.delete('/api/admin/students/:id', auth, isAdmin, adminController.deleteStudent);
-app.post('/api/admin/students/:id/reset-password', auth, isAdmin, adminController.resetStudentPassword);
 app.post('/api/admin/students/bulk-upload', auth, isAdmin, upload.single('file'), adminController.bulkUploadStudents);
 app.post('/api/admin/attendance', auth, isAdmin, adminController.manageAttendance);
 app.post('/api/admin/marks', auth, isAdmin, adminController.manageMarks);
@@ -485,14 +490,7 @@ app.get('/api/admin/downloads', auth, isAdmin, adminController.getAllDownloads);
 app.put('/api/admin/downloads/:id', auth, isAdmin, adminController.updateDownload);
 app.delete('/api/admin/downloads/:id', auth, isAdmin, adminController.deleteDownload);
 
-// User Management Routes
-app.get('/api/admin/users', auth, isAdmin, userController.getAllUsers);
-app.get('/api/admin/users/:id', auth, isAdmin, userController.getUserById);
-app.post('/api/admin/users', auth, isAdmin, userController.createUser);
-app.put('/api/admin/users/:id', auth, isAdmin, userController.updateUser);
-app.delete('/api/admin/users/:id', auth, isAdmin, userController.deleteUser);
-app.patch('/api/admin/users/:id/toggle-active', auth, isAdmin, userController.toggleUserActive);
-app.post('/api/admin/users/:id/reset-password', auth, isAdmin, userController.resetUserPassword);
+
 
 // ================
 // STUDENT ROUTES
@@ -610,7 +608,7 @@ app.get('/api/placements/student/:studentId', auth, placementController.getStude
 app.get('/api/placements/company/:companyId', placementController.getCompanyPlacements);
 app.get('/api/placements/year/:year', placementController.getPlacementsByYear);
 app.get('/api/placements/search', placementController.searchPlacements);
-
+ 
 // ====================
 // HEALTH CHECK
 // ====================
