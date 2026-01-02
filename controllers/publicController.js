@@ -203,10 +203,19 @@ exports.getGallery = async (req, res) => {
       gallery.map(item => item.incrementViews())
     );
 
+    // Attach full URLs so clients don't need to build them
+    const host = `${req.protocol}://${req.get('host')}`;
+    const galleryWithUrls = gallery.map(item => {
+      const obj = item.toObject ? item.toObject() : item;
+      obj.fullImageUrl = obj.imageUrl && obj.imageUrl.startsWith('http') ? obj.imageUrl : `${host}${obj.imageUrl}`;
+      obj.fullThumbnailUrl = obj.thumbnailUrl && obj.thumbnailUrl.startsWith('http') ? obj.thumbnailUrl : `${host}${obj.thumbnailUrl || obj.imageUrl}`;
+      return obj;
+    });
+
     res.json({
       success: true,
       data: {
-        gallery,
+        gallery: galleryWithUrls,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -256,11 +265,24 @@ exports.getGalleryItem = async (req, res) => {
     .limit(4)
     .select('title imageUrl thumbnailUrl category');
 
+    // Attach full URLs
+    const host = `${req.protocol}://${req.get('host')}`;
+    const galleryItemObj = galleryItem.toObject ? galleryItem.toObject() : galleryItem;
+    galleryItemObj.fullImageUrl = galleryItemObj.imageUrl && galleryItemObj.imageUrl.startsWith('http') ? galleryItemObj.imageUrl : `${host}${galleryItemObj.imageUrl}`;
+    galleryItemObj.fullThumbnailUrl = galleryItemObj.thumbnailUrl && galleryItemObj.thumbnailUrl.startsWith('http') ? galleryItemObj.thumbnailUrl : `${host}${galleryItemObj.thumbnailUrl || galleryItemObj.imageUrl}`;
+
+    const relatedWithUrls = relatedGallery.map(item => {
+      const obj = item.toObject ? item.toObject() : item;
+      obj.fullImageUrl = obj.imageUrl && obj.imageUrl.startsWith('http') ? obj.imageUrl : `${host}${obj.imageUrl}`;
+      obj.fullThumbnailUrl = obj.thumbnailUrl && obj.thumbnailUrl.startsWith('http') ? obj.thumbnailUrl : `${host}${obj.thumbnailUrl || obj.imageUrl}`;
+      return obj;
+    });
+
     res.json({
       success: true,
       data: {
-        galleryItem,
-        relatedGallery
+        galleryItem: galleryItemObj,
+        relatedGallery: relatedWithUrls
       }
     });
   } catch (error) {

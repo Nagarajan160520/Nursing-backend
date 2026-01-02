@@ -42,7 +42,23 @@ const app = express();
 // ====================
 // SECURITY MIDDLEWARE
 // ====================
-app.use(helmet()); // Set security HTTP headers
+// Configure helmet to allow cross-origin resource loading for static assets (images)
+const appUrl = process.env.APP_URL || `http://localhost:5000`;
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+      imgSrc: ["'self'", 'data:', appUrl, 'https:'],
+      connectSrc: ["'self'", 'https:', 'ws:'],
+      fontSrc: ["'self'", 'https:', 'data:'],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: []
+    }
+  }
+})); // Set security HTTP headers (configured for cross-origin images)
 
 // Rate limiting
 const limiter = rateLimit({
@@ -95,17 +111,33 @@ if (process.env.NODE_ENV === 'development') {
 // ====================
 // STATIC FILES
 // ====================
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Serve uploads with permissive headers to allow cross-origin image loading from the frontend
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+  setHeaders: (res, filePath) => {
+    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  }
+}));
 
 // Serve frontend static images (used by placeholder previews)
 const frontendImagesPath = path.join(__dirname, '..', 'frontend', 'public', 'images');
 if (fs.existsSync(frontendImagesPath)) {
-  app.use('/images', express.static(frontendImagesPath));
+  app.use('/images', express.static(frontendImagesPath, {
+    setHeaders: (res) => {
+      res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+  }));
 } else {
   // If images folder doesn't exist, create a placeholder directory to avoid 404s in logs
   try {
     fs.mkdirSync(frontendImagesPath, { recursive: true });
-    app.use('/images', express.static(frontendImagesPath));
+    app.use('/images', express.static(frontendImagesPath, {
+      setHeaders: (res) => {
+        res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      }
+    }));
     console.log(`Created and serving placeholder images directory: ${frontendImagesPath}`);
   } catch (err) {
     console.warn('Could not create frontend images directory:', err.message);

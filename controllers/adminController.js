@@ -367,10 +367,16 @@ exports.uploadGallery = async (req, res) => {
     const galleryItem = new Gallery(galleryData);
     await galleryItem.save();
 
+    // Build full URLs so frontend can display immediately
+    const host = `${req.protocol}://${req.get('host')}`;
+    const itemObj = galleryItem.toObject ? galleryItem.toObject() : galleryItem;
+    itemObj.fullImageUrl = `${host}${itemObj.imageUrl}`;
+    itemObj.fullThumbnailUrl = `${host}${itemObj.thumbnailUrl || itemObj.imageUrl}`;
+
     res.status(201).json({
       success: true,
       message: 'Image uploaded successfully',
-      data: galleryItem
+      data: itemObj
     });
   } catch (error) {
     console.error('Upload Gallery Error:', error);
@@ -418,15 +424,24 @@ exports.getAllGallery = async (req, res) => {
     const albums = await Gallery.distinct('album');
     const categories = await Gallery.distinct('category');
 
+    // Attach full URLs so admin UI does not need to build them
+    const host = `${req.protocol}://${req.get('host')}`;
+    const galleryWithUrls = gallery.map(item => {
+      const obj = item.toObject ? item.toObject() : item;
+      obj.fullImageUrl = obj.imageUrl && obj.imageUrl.startsWith('http') ? obj.imageUrl : `${host}${obj.imageUrl}`;
+      obj.fullThumbnailUrl = obj.thumbnailUrl && obj.thumbnailUrl.startsWith('http') ? obj.thumbnailUrl : `${host}${obj.thumbnailUrl || obj.imageUrl}`;
+      return obj;
+    });
+
     res.json({
       success: true,
       data: {
-        gallery,
+        gallery: galleryWithUrls,
         filters: {
           albums,
           categories
         },
-        count: gallery.length
+        count: galleryWithUrls.length
       }
     });
   } catch (error) {
