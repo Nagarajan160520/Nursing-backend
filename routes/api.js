@@ -12,7 +12,7 @@ router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
 router.use('/student', studentRoutes);
 router.use('/public', publicRoutes);
-
+ 
 // Export as a function
 module.exports = (app) => {
   app.use('/api', router);

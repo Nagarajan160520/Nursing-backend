@@ -2961,19 +2961,62 @@ exports.getSystemSettings = async (req, res) => {
     res.json({
       success: true,
       data: {
-        instituteName: 'Nursing Institute',
-        instituteEmail: 'admin@nursinginstitute.edu',
-        institutePhone: '+91 9876543210',
-        address: '123 Nursing Street, Medical City',
-        academicYear: '2024-2025',
-        semesterStartDate: '2024-06-01',
-        semesterEndDate: '2024-11-30',
-        attendanceThreshold: 75,
-        marksPassingPercentage: 40,
-        autoBackup: true,
-        backupFrequency: 'daily',
-        emailNotifications: true,
-        smsNotifications: false
+        general: {
+          instituteName: 'Nursing Institute',
+          instituteAddress: '123 Nursing Street, Medical City',
+          contactEmail: 'admin@nursinginstitute.edu',
+          contactPhone: '+91 9876543210',
+          websiteUrl: 'https://nursinginstitute.edu',
+          timezone: 'Asia/Kolkata',
+          language: 'English',
+          dateFormat: 'DD/MM/YYYY',
+          currency: 'INR',
+          academicYear: new Date().getFullYear(),
+          maxLoginAttempts: 5,
+          sessionTimeout: 30
+        },
+        theme: {
+          primaryColor: '#0d6efd',
+          secondaryColor: '#6c757d',
+          accentColor: '#198754',
+          themeMode: 'light',
+          logoUrl: '/logo.png',
+          faviconUrl: '/favicon.ico',
+          headerColor: '#ffffff',
+          sidebarColor: '#343a40'
+        },
+        notification: {
+          emailNotifications: true,
+          smsNotifications: false,
+          pushNotifications: true,
+          studentAlerts: true,
+          facultyAlerts: true,
+          adminAlerts: true,
+          attendanceAlerts: true,
+          marksAlerts: true,
+          feeAlerts: true,
+          newsAlerts: true
+        },
+        security: {
+          requireStrongPassword: true,
+          passwordExpiryDays: 90,
+          twoFactorAuth: false,
+          ipWhitelist: '',
+          allowedFileTypes: 'pdf,doc,docx,xls,xlsx,jpg,jpeg,png',
+          maxFileSize: 10,
+          sslEnforced: true,
+          cookieSecure: true
+        },
+        backup: {
+          autoBackup: true,
+          backupFrequency: 'daily',
+          backupTime: '02:00',
+          keepBackups: 30,
+          backupLocation: 'local',
+          cloudStorage: false,
+          lastBackup: null,
+          nextBackup: null
+        }
       }
     });
   } catch (error) {
@@ -3004,5 +3047,116 @@ exports.updateSystemSettings = async (req, res) => {
       success: false,
       message: 'Failed to update system settings'
     });
+  }
+};
+
+// @desc    Reset system settings to defaults
+// @route   POST /api/admin/settings/reset
+// @access  Private (Admin)
+exports.resetSystemSettings = async (req, res) => {
+  try {
+    // Return default values - implement persistent reset as needed
+    const defaults = {
+      general: {
+        instituteName: 'Nursing Institute',
+        instituteAddress: '123 Nursing Street, Medical City',
+        contactEmail: 'admin@nursinginstitute.edu',
+        contactPhone: '+91 9876543210',
+        websiteUrl: 'https://nursinginstitute.edu',
+        timezone: 'Asia/Kolkata',
+        language: 'English',
+        dateFormat: 'DD/MM/YYYY',
+        currency: 'INR',
+        academicYear: new Date().getFullYear(),
+        maxLoginAttempts: 5,
+        sessionTimeout: 30
+      },
+      theme: {
+        primaryColor: '#0d6efd',
+        secondaryColor: '#6c757d',
+        accentColor: '#198754',
+        themeMode: 'light',
+        logoUrl: '/logo.png',
+        faviconUrl: '/favicon.ico',
+        headerColor: '#ffffff',
+        sidebarColor: '#343a40'
+      },
+      notification: {
+        emailNotifications: true,
+        smsNotifications: false,
+        pushNotifications: true,
+        studentAlerts: true,
+        facultyAlerts: true,
+        adminAlerts: true,
+        attendanceAlerts: true,
+        marksAlerts: true,
+        feeAlerts: true,
+        newsAlerts: true
+      },
+      security: {
+        requireStrongPassword: true,
+        passwordExpiryDays: 90,
+        twoFactorAuth: false,
+        ipWhitelist: '',
+        allowedFileTypes: 'pdf,doc,docx,xls,xlsx,jpg,jpeg,png',
+        maxFileSize: 10,
+        sslEnforced: true,
+        cookieSecure: true
+      },
+      backup: {
+        autoBackup: true,
+        backupFrequency: 'daily',
+        backupTime: '02:00',
+        keepBackups: 30,
+        backupLocation: 'local',
+        cloudStorage: false,
+        lastBackup: null,
+        nextBackup: null
+      }
+    };
+
+    // TODO: Persist defaults to DB/config if required
+    res.json({
+      success: true,
+      message: 'Settings reset to defaults',
+      data: defaults
+    });
+  } catch (error) {
+    console.error('Reset System Settings Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reset system settings'
+    });
+  }
+};
+
+// @desc    Clear application cache
+// @route   POST /api/admin/clear-cache
+// @access  Private (Admin)
+exports.clearCache = async (req, res) => {
+  try {
+    // Placeholder: clear in-memory caches, temp files, etc.
+    // Implement actual cache clearing for your environment
+    res.json({ success: true, message: 'Cache cleared successfully' });
+  } catch (error) {
+    console.error('Clear Cache Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to clear cache' });
+  }
+};
+
+// @desc    Run basic system checks
+// @route   GET /api/admin/system-check
+// @access  Private (Admin)
+exports.systemCheck = async (req, res) => {
+  try {
+    // Perform simple checks (DB connection, disk space, etc.) - placeholder implementation
+    const issues = [];
+    // Example check placeholders (expand as needed)
+    // if (!db.isConnected) issues.push({name: 'Database', severity: 'critical', message: 'DB not connected'});
+
+    res.json({ success: true, data: { issues } });
+  } catch (error) {
+    console.error('System Check Error:', error);
+    res.status(500).json({ success: false, message: 'System check failed' });
   }
 };

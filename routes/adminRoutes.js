@@ -85,11 +85,11 @@ router.get('/downloads', adminController.getAllDownloads);
 router.put('/downloads/:id', adminController.updateDownload);
 router.delete('/downloads/:id', adminController.deleteDownload);
 
-// Settings Management - TODO: Implement these functions
-// router.get('/settings', adminController.getSettings);
-// router.put('/settings', adminController.updateSettings);
-// router.post('/settings/reset', adminController.resetSettings);
-// router.post('/clear-cache', adminController.clearCache);
-// router.get('/system-check', adminController.systemCheck);
+// Settings Management
+router.get('/settings', adminController.getSystemSettings);
+router.put('/settings', adminController.updateSystemSettings);
+router.post('/settings/reset', adminController.resetSystemSettings);
+router.post('/clear-cache', adminController.clearCache);
+router.get('/system-check', adminController.systemCheck);
 
 module.exports = router; 
