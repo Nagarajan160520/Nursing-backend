@@ -208,15 +208,15 @@ exports.getMarks = async (req, res) => {
 
     // Build query
     const query = { student: student._id };
-    
+
     if (semester) {
       query.semester = parseInt(semester);
     }
-    
+
     if (subject) {
       query.subject = subject;
     }
-    
+
     if (examType) {
       query.examType = examType;
     }
@@ -238,11 +238,11 @@ exports.getMarks = async (req, res) => {
           passedSubjects: 0
         };
       }
-      
+
       semesterStats[sem].totalSubjects++;
       semesterStats[sem].totalMarks += mark.totalMarks.max;
       semesterStats[sem].obtainedMarks += mark.totalMarks.obtained;
-      
+
       if (mark.resultStatus === 'Pass') {
         semesterStats[sem].passedSubjects++;
       }
@@ -251,9 +251,9 @@ exports.getMarks = async (req, res) => {
     // Calculate percentages
     Object.keys(semesterStats).forEach(sem => {
       const stats = semesterStats[sem];
-      stats.percentage = stats.totalMarks > 0 ? 
+      stats.percentage = stats.totalMarks > 0 ?
         (stats.obtainedMarks / stats.totalMarks) * 100 : 0;
-      stats.passPercentage = stats.totalSubjects > 0 ? 
+      stats.passPercentage = stats.totalSubjects > 0 ?
         (stats.passedSubjects / stats.totalSubjects) * 100 : 0;
     });
 
@@ -276,6 +276,108 @@ exports.getMarks = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch marks data'
+    });
+  }
+};
+
+// @desc    Download student marks as CSV
+// @route   GET /api/student/marks/download
+// @access  Private (Student)
+exports.downloadMarks = async (req, res) => {
+  try {
+    const { semester, subject, examType, format = 'csv' } = req.query;
+    const student = await Student.findOne({ userId: req.user._id })
+      .populate('courseEnrolled', 'courseName courseCode');
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
+    // Build query
+    const query = { student: student._id };
+
+    if (semester) {
+      query.semester = parseInt(semester);
+    }
+
+    if (subject) {
+      query.subject = subject;
+    }
+
+    if (examType) {
+      query.examType = examType;
+    }
+
+    const marks = await Marks.find(query)
+      .sort({ semester: 1, examDate: -1 })
+      .populate('course', 'courseName')
+      .select('-__v');
+
+    if (marks.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No marks data found for download'
+      });
+    }
+
+    // Generate CSV content
+    let csvContent = 'Student ID,Student Name,Course,Semester,Subject,Exam Type,Exam Date,Theory Max,Theory Obtained,Practical Max,Practical Obtained,Viva Max,Viva Obtained,Assignment Max,Assignment Obtained,Total Max,Total Obtained,Percentage,Grade,Result Status\n';
+
+    marks.forEach(mark => {
+      const row = [
+        student.studentId,
+        student.fullName,
+        student.courseEnrolled?.courseName || '',
+        mark.semester,
+        mark.subject,
+        mark.examType,
+        mark.examDate ? new Date(mark.examDate).toLocaleDateString('en-IN') : '',
+        mark.marks.theory.max,
+        mark.marks.theory.obtained,
+        mark.marks.practical.max,
+        mark.marks.practical.obtained,
+        mark.marks.viva.max,
+        mark.marks.viva.obtained,
+        mark.marks.assignment.max,
+        mark.marks.assignment.obtained,
+        mark.totalMarks.max,
+        mark.totalMarks.obtained,
+        mark.percentage ? mark.percentage.toFixed(2) : '',
+        mark.grade,
+        mark.resultStatus
+      ];
+
+      // Escape commas and quotes in fields
+      const escapedRow = row.map(field => {
+        const str = String(field || '');
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+      });
+
+      csvContent += escapedRow.join(',') + '\n';
+    });
+
+    // Set headers for download
+    const fileName = `marks_${student.studentId}_${new Date().toISOString().split('T')[0]}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    res.send(csvContent);
+
+  } catch (error) {
+    console.error('Download Marks Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to download marks data'
     });
   }
 };

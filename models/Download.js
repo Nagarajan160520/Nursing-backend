@@ -32,12 +32,16 @@ const downloadSchema = new mongoose.Schema({
     enum: ['Syllabus', 'Timetable', 'Notes', 'Question Paper', 'Lab Manual', 'Form', 'Circular', 'Result', 'Hall Ticket', 'Certificate', 'Other'],
     required: true
   },
-  targetAudience: {
-    type: [String],
-    enum: ['all', 'students', 'faculty', 'admin', 'specific_course', 'specific_year'],
+  targetAudience: [{
+    type: String,
+    enum: ['all', 'students', 'faculty', 'specific_students', 'specific_course', 'specific_year', 'specific_department'],
     default: ['all']
-  },
+  }],
   specificTargets: {
+    students: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Student'
+    }],
     courses: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Course'

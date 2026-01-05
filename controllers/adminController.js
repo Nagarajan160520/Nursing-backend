@@ -2434,68 +2434,70 @@ exports.searchStudents = async (req, res) => {
   }
 };
 
-// @desc    Manage attendance
+// @desc    Mark attendance
 // @route   POST /api/admin/attendance
 // @access  Private (Admin)
-exports.manageAttendance = async (req, res) => {
+exports.markAttendance = async (req, res) => {
   try {
-    const { date, course, semester, subject, attendanceData } = req.body;
+    const { date, course, subject, semester, session, type, students } = req.body;
 
     // Validate input
-    if (!date || !course || !semester || !subject || !attendanceData) {
+    if (!date || !course || !subject || !students || !Array.isArray(students)) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required fields'
+        message: 'Missing required fields: date, course, subject, students array'
       });
     }
 
     const results = {
-      total: attendanceData.length,
+      total: students.length,
       success: 0,
       failed: 0,
       errors: []
     };
 
     // Process each attendance record
-    const affectedStudentIds = new Set();
-    for (const record of attendanceData) {
+    const attendanceRecords = [];
+    for (const studentData of students) {
       try {
         const attendance = new Attendance({
-          student: record.studentId,
+          student: studentData.studentId,
           date: new Date(date),
           course,
           subject,
-          semester: parseInt(semester),
-          type: record.type || 'Theory',
-          status: record.status || 'Absent',
-          hoursAttended: record.hoursAttended || 0,
-          remarks: record.remarks,
+          semester: parseInt(semester) || 1,
+          session: session || 'Morning',
+          type: type || 'Theory',
+          status: studentData.status || 'Present',
+          hoursAttended: studentData.hoursAttended || 4,
+          remarks: studentData.remarks || '',
           recordedBy: req.user._id
         });
 
         await attendance.save();
+        attendanceRecords.push(attendance);
         results.success++;
-        affectedStudentIds.add(record.studentId);
       } catch (error) {
         results.failed++;
         results.errors.push({
-          studentId: record.studentId,
+          studentId: studentData.studentId,
           error: error.message
         });
       }
     }
 
-    // Emit events to affected students and course room
+    // Emit real-time events
     try {
       const io = req.app.get('io');
       if (io) {
-        // Notify course-level listeners
-        io.to(`course:${course}`).emit('attendance:changed', { date, subject, semester, course });
-
-        // Notify each student's socket (resolve userIds)
-        const studentDocs = await Student.find({ _id: { $in: Array.from(affectedStudentIds) } }).select('userId');
-        studentDocs.forEach(s => {
-          if (s.userId) io.to(`user:${s.userId}`).emit('attendance:changed', { date, subject, semester, course, studentId: s._id });
+        io.to(`course:${course}`).emit('attendance:marked', {
+          date,
+          subject,
+          semester,
+          course,
+          type,
+          session,
+          count: results.success
         });
       }
     } catch (err) {
@@ -2504,14 +2506,286 @@ exports.manageAttendance = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Attendance recorded successfully',
+      message: 'Attendance marked successfully',
       data: results
     });
   } catch (error) {
-    console.error('Manage Attendance Error:', error);
+    console.error('Mark Attendance Error:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to record attendance'
+      message: 'Failed to mark attendance'
+    });
+  }
+};
+
+// @desc    Get attendance records
+// @route   GET /api/admin/attendance
+// @access  Private (Admin)
+exports.getAttendance = async (req, res) => {
+  try {
+    const { date, course, semester, subject, studentId, page = 1, limit = 50 } = req.query;
+
+    const query = {};
+
+    if (date) {
+      // If specific date, match that date
+      const startDate = new Date(date);
+      const endDate = new Date(date);
+      endDate.setDate(endDate.getDate() + 1);
+      query.date = { $gte: startDate, $lt: endDate };
+    }
+
+    if (course) query.course = course;
+    if (semester) query.semester = parseInt(semester);
+    if (subject) query.subject = { $regex: subject, $options: 'i' };
+    if (studentId) query.student = studentId;
+
+    const total = await Attendance.countDocuments(query);
+    const attendance = await Attendance.find(query)
+      .populate('student', 'studentId fullName')
+      .populate('course', 'courseName courseCode')
+      .populate('recordedBy', 'username')
+      .sort({ date: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .select('-__v');
+
+    res.json({
+      success: true,
+      data: {
+        attendance,
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get Attendance Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch attendance records'
+    });
+  }
+};
+
+// @desc    Generate attendance report
+// @route   GET /api/admin/attendance/report
+// @access  Private (Admin)
+exports.generateAttendanceReport = async (req, res) => {
+  try {
+    const { studentId, course, semester, month, year } = req.query;
+
+    if (!course || !month || !year) {
+      return res.status(400).json({
+        success: false,
+        message: 'Course, month, and year are required'
+      });
+    }
+
+    const startDate = new Date(year, month - 1, 1);
+    const endDate = new Date(year, month, 1);
+
+    let query = {
+      course,
+      date: { $gte: startDate, $lt: endDate }
+    };
+
+    if (semester) query.semester = parseInt(semester);
+    if (studentId) query.student = studentId;
+
+    // Get all attendance records for the month
+    const attendanceRecords = await Attendance.find(query)
+      .populate('student', 'studentId fullName')
+      .populate('course', 'courseName courseCode')
+      .sort({ date: 1 });
+
+    // Group by student
+    const studentAttendance = {};
+    const totalDays = new Date(year, month, 0).getDate(); // Days in month
+
+    attendanceRecords.forEach(record => {
+      const studentId = record.student._id.toString();
+      if (!studentAttendance[studentId]) {
+        studentAttendance[studentId] = {
+          student: record.student,
+          records: [],
+          present: 0,
+          absent: 0,
+          late: 0,
+          totalHours: 0
+        };
+      }
+
+      studentAttendance[studentId].records.push(record);
+
+      // Count status
+      if (record.status === 'Present') studentAttendance[studentId].present++;
+      else if (record.status === 'Absent') studentAttendance[studentId].absent++;
+      else if (record.status === 'Late') studentAttendance[studentId].late++;
+
+      studentAttendance[studentId].totalHours += record.hoursAttended || 0;
+    });
+
+    // Calculate percentages and prepare report data
+    const students = Object.values(studentAttendance).map(data => {
+      const totalMarked = data.present + data.absent + data.late;
+      const percentage = totalMarked > 0 ? Math.round((data.present / totalMarked) * 100) : 0;
+
+      return {
+        studentId: data.student.studentId,
+        fullName: data.student.fullName,
+        presentDays: data.present,
+        absentDays: data.absent,
+        lateDays: data.late,
+        totalDays: totalMarked,
+        percentage,
+        totalHours: data.totalHours
+      };
+    });
+
+    // Calculate summary stats
+    const totalStudents = students.length;
+    const averagePercentage = totalStudents > 0
+      ? Math.round(students.reduce((sum, s) => sum + s.percentage, 0) / totalStudents)
+      : 0;
+
+    const bestStudent = students.reduce((best, current) =>
+      current.percentage > best.percentage ? current : best,
+      { percentage: 0 }
+    );
+
+    const worstStudent = students.reduce((worst, current) =>
+      current.percentage < worst.percentage ? current : worst,
+      { percentage: 100 }
+    );
+
+    const report = {
+      courseName: attendanceRecords[0]?.course?.courseName || 'Unknown Course',
+      month: parseInt(month),
+      year: parseInt(year),
+      totalDays,
+      totalStudents,
+      averagePercentage,
+      bestStudent: bestStudent.percentage > 0 ? {
+        name: bestStudent.fullName,
+        percentage: bestStudent.percentage
+      } : null,
+      worstStudent: worstStudent.percentage < 100 ? {
+        name: worstStudent.fullName,
+        percentage: worstStudent.percentage
+      } : null,
+      students
+    };
+
+    res.json({
+      success: true,
+      data: report
+    });
+  } catch (error) {
+    console.error('Generate Attendance Report Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate attendance report'
+    });
+  }
+};
+
+// @desc    Bulk upload attendance
+// @route   POST /api/admin/attendance/bulk
+// @access  Private (Admin)
+exports.bulkUploadAttendance = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please upload a CSV file'
+      });
+    }
+
+    const results = {
+      total: 0,
+      success: 0,
+      failed: 0,
+      errors: []
+    };
+
+    // Read CSV data
+    const csvData = fs.readFileSync(req.file.path, 'utf8');
+    const rows = csvData.split('\n').slice(1); // Skip header
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i].trim();
+      if (!row) continue;
+
+      const columns = row.split(',');
+      if (columns.length < 8) {
+        results.failed++;
+        results.errors.push({ row: i + 2, error: 'Invalid CSV format' });
+        continue;
+      }
+
+      try {
+        const [date, studentId, course, subject, semester, session, type, status, hoursAttended, remarks] = columns;
+
+        // Find student by studentId
+        const student = await Student.findOne({ studentId: studentId.trim() });
+        if (!student) {
+          throw new Error(`Student ${studentId} not found`);
+        }
+
+        // Find course
+        const courseDoc = await Course.findOne({ courseCode: course.trim().toUpperCase() });
+        if (!courseDoc) {
+          throw new Error(`Course ${course} not found`);
+        }
+
+        const attendance = new Attendance({
+          student: student._id,
+          date: new Date(date.trim()),
+          course: courseDoc._id,
+          subject: subject.trim(),
+          semester: parseInt(semester.trim()) || 1,
+          session: session.trim() || 'Morning',
+          type: type.trim() || 'Theory',
+          status: status.trim() || 'Present',
+          hoursAttended: parseInt(hoursAttended.trim()) || 4,
+          remarks: remarks ? remarks.trim() : '',
+          recordedBy: req.user._id
+        });
+
+        await attendance.save();
+        results.success++;
+        results.total++;
+
+      } catch (error) {
+        results.failed++;
+        results.total++;
+        results.errors.push({
+          row: i + 2,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      success: true,
+      message: 'Bulk upload completed',
+      data: results
+    });
+  } catch (error) {
+    console.error('Bulk Upload Attendance Error:', error);
+
+    // Clean up file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process bulk upload'
     });
   }
 };
@@ -2820,8 +3094,16 @@ exports.uploadStudyMaterial = async (req, res) => {
 
     // Handle specific targets
     if (req.body.specificTargets) {
-      const targets = JSON.parse(req.body.specificTargets);
-      downloadData.specificTargets = targets;
+      try {
+        // If specificTargets is a string, parse it; otherwise use as object
+        const targets = typeof req.body.specificTargets === 'string'
+          ? JSON.parse(req.body.specificTargets)
+          : req.body.specificTargets;
+        downloadData.specificTargets = targets;
+      } catch (error) {
+        console.error('Error parsing specificTargets:', error);
+        // Continue without specific targets if parsing fails
+      }
     }
 
     const download = new Download(downloadData);

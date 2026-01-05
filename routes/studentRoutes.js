@@ -16,6 +16,7 @@ router.put('/profile', studentController.updateProfile);
 // Academic
 router.get('/attendance', studentController.getAttendance);
 router.get('/marks', studentController.getMarks);
+router.get('/marks/download', studentController.downloadMarks);
 router.get('/clinical-schedule', studentController.getClinicalSchedule);
 
 // Downloads

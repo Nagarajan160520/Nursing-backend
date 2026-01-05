@@ -76,11 +76,11 @@ router.get('/faculty/:id', adminController.getFacultyById);
 router.put('/faculty/:id', adminController.updateFaculty);
 router.delete('/faculty/:id', adminController.deleteFaculty);
 
-// Attendance Management - TODO: Implement these functions
-// router.post('/attendance', adminController.markAttendance);
-// router.get('/attendance', adminController.getAttendance);
-// router.get('/attendance/report', adminController.generateAttendanceReport);
-// router.post('/attendance/bulk', upload.single('file'), adminController.bulkUploadAttendance);
+// Attendance Management
+router.post('/attendance', adminController.markAttendance);
+router.get('/attendance', adminController.getAttendance);
+router.get('/attendance/report', adminController.generateAttendanceReport);
+router.post('/attendance/bulk', upload.single('file'), adminController.bulkUploadAttendance);
 
 // Marks Management
 router.post('/marks', adminController.manageMarks);

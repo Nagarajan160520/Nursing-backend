@@ -538,7 +538,7 @@ app.get('/api/admin/students/:id', auth, isAdmin, adminController.getStudentDeta
 app.put('/api/admin/students/:id', auth, isAdmin, adminController.updateStudent);
 app.delete('/api/admin/students/:id', auth, isAdmin, adminController.deleteStudent);
 app.post('/api/admin/students/bulk-upload', auth, isAdmin, upload.single('file'), adminController.bulkUploadStudents);
-app.post('/api/admin/attendance', auth, isAdmin, adminController.manageAttendance);
+app.post('/api/admin/attendance', auth, isAdmin, adminController.markAttendance);
 app.post('/api/admin/marks', auth, isAdmin, adminController.manageMarks);
 app.put('/api/admin/marks/publish', auth, isAdmin, adminController.publishMarks);
 app.post('/api/admin/downloads', auth, isAdmin, upload.single('file'), adminController.uploadStudyMaterial);
@@ -598,8 +598,8 @@ app.get('/api/courses/stats', auth, isAdmin, courseController.getCourseStats);
 // DOWNLOAD ROUTES
 // ================
 app.get('/api/downloads', downloadController.getAllDownloads);
-app.get('/api/downloads/:id', downloadController.getDownload);
 app.get('/api/downloads/:id/file', downloadController.downloadFile);
+app.get('/api/downloads/:id', downloadController.getDownload);
 app.get('/api/downloads/categories', downloadController.getDownloadCategories);
 app.get('/api/downloads/recent', downloadController.getRecentDownloads);
 app.get('/api/downloads/popular', downloadController.getPopularDownloads);
