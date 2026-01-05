@@ -296,6 +296,13 @@ exports.getProfile = async (req, res) => {
       });
     }
 
+    // Set cache control headers to prevent aggressive caching
+    res.set({
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+
     res.json({
       success: true,
       data: student
