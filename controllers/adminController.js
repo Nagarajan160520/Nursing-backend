@@ -8,6 +8,7 @@ const Attendance = require('../models/Attendance');
 const Marks = require('../models/Marks');
 const Download = require('../models/Download');
 const Notification = require('../models/Notification');
+const Timetable = require('../models/Timetable');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
 const sendEmail = require('../utils/sendEmail');
@@ -3763,6 +3764,296 @@ exports.clearCache = async (req, res) => {
   } catch (error) {
     console.error('Clear Cache Error:', error);
     res.status(500).json({ success: false, message: 'Failed to clear cache' });
+  }
+};
+
+// @desc    Add new timetable entry
+// @route   POST /api/admin/timetable
+// @access  Private (Admin)
+exports.addTimetable = async (req, res) => {
+  try {
+    const timetableData = {
+      ...req.body,
+      createdBy: req.user._id
+    };
+
+    // Validate required fields
+    const requiredFields = ['course', 'semester', 'day', 'subject', 'startTime', 'endTime', 'faculty', 'room'];
+    const missingFields = requiredFields.filter(field => !timetableData[field]);
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      });
+    }
+
+    // Check if course exists
+    const course = await Course.findById(timetableData.course);
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Course not found'
+      });
+    }
+
+    const timetable = new Timetable(timetableData);
+    await timetable.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Timetable entry added successfully',
+      data: timetable
+    });
+  } catch (error) {
+    console.error('Add Timetable Error:', error);
+    if (error.code === 11000) {
+      res.status(400).json({
+        success: false,
+        message: 'Timetable entry already exists for this course, semester, day, and time slot'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to add timetable entry'
+      });
+    }
+  }
+};
+
+// @desc    Get all timetable entries
+// @route   GET /api/admin/timetable
+// @access  Private (Admin)
+exports.getAllTimetables = async (req, res) => {
+  try {
+    const { course, semester, day, faculty, subject, page = 1, limit = 50 } = req.query;
+
+    const query = {};
+
+    if (course) query.course = course;
+    if (semester) query.semester = parseInt(semester);
+    if (day) query.day = day;
+    if (faculty) query.faculty = { $regex: faculty, $options: 'i' };
+    if (subject) query.subject = { $regex: subject, $options: 'i' };
+
+    const total = await Timetable.countDocuments(query);
+    const timetables = await Timetable.find(query)
+      .sort({ day: 1, startTime: 1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .populate('course', 'courseName courseCode')
+      .populate('createdBy', 'username');
+
+    res.json({
+      success: true,
+      data: {
+        timetables,
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get All Timetables Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch timetable entries'
+    });
+  }
+};
+
+// @desc    Get single timetable entry
+// @route   GET /api/admin/timetable/:id
+// @access  Private (Admin)
+exports.getTimetable = async (req, res) => {
+  try {
+    const timetable = await Timetable.findById(req.params.id)
+      .populate('course', 'courseName courseCode duration')
+      .populate('createdBy', 'username');
+
+    if (!timetable) {
+      return res.status(404).json({
+        success: false,
+        message: 'Timetable entry not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: timetable
+    });
+  } catch (error) {
+    console.error('Get Timetable Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch timetable entry'
+    });
+  }
+};
+
+// @desc    Update timetable entry
+// @route   PUT /api/admin/timetable/:id
+// @access  Private (Admin)
+exports.updateTimetable = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const timetable = await Timetable.findById(id);
+    if (!timetable) {
+      return res.status(404).json({
+        success: false,
+        message: 'Timetable entry not found'
+      });
+    }
+
+    // Apply updates
+    Object.keys(updates).forEach(key => {
+      timetable[key] = updates[key];
+    });
+
+    await timetable.save();
+
+    res.json({
+      success: true,
+      message: 'Timetable entry updated successfully',
+      data: timetable
+    });
+  } catch (error) {
+    console.error('Update Timetable Error:', error);
+    if (error.code === 11000) {
+      res.status(400).json({
+        success: false,
+        message: 'Timetable entry already exists for this course, semester, day, and time slot'
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to update timetable entry'
+      });
+    }
+  }
+};
+
+// @desc    Delete timetable entry
+// @route   DELETE /api/admin/timetable/:id
+// @access  Private (Admin)
+exports.deleteTimetable = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const timetable = await Timetable.findByIdAndDelete(id);
+    if (!timetable) {
+      return res.status(404).json({
+        success: false,
+        message: 'Timetable entry not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Timetable entry deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete Timetable Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete timetable entry'
+    });
+  }
+};
+
+// @desc    Bulk upload timetable entries
+// @route   POST /api/admin/timetable/bulk-upload
+// @access  Private (Admin)
+exports.bulkUploadTimetable = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please upload a CSV file'
+      });
+    }
+
+    const results = {
+      total: 0,
+      success: 0,
+      failed: 0,
+      errors: []
+    };
+
+    // Read CSV data
+    const csvData = fs.readFileSync(req.file.path, 'utf8');
+    const rows = csvData.split('\n').slice(1); // Skip header
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i].trim();
+      if (!row) continue;
+
+      const columns = row.split(',');
+      if (columns.length < 9) {
+        results.failed++;
+        results.errors.push({ row: i + 2, error: 'Invalid CSV format' });
+        continue;
+      }
+
+      try {
+        const [courseCode, semester, day, subject, startTime, endTime, type, faculty, room] = columns;
+
+        // Find course by code
+        const course = await Course.findOne({ courseCode: courseCode.trim().toUpperCase() });
+        if (!course) {
+          throw new Error(`Course ${courseCode} not found`);
+        }
+
+        const timetableData = {
+          course: course._id,
+          semester: parseInt(semester.trim()),
+          day: day.trim(),
+          subject: subject.trim(),
+          startTime: startTime.trim(),
+          endTime: endTime.trim(),
+          type: type.trim() || 'Theory',
+          faculty: faculty.trim(),
+          room: room.trim(),
+          createdBy: req.user._id
+        };
+
+        const timetable = new Timetable(timetableData);
+        await timetable.save();
+        results.success++;
+        results.total++;
+
+      } catch (error) {
+        results.failed++;
+        results.total++;
+        results.errors.push({
+          row: i + 2,
+          error: error.message
+        });
+      }
+    }
+
+    // Clean up uploaded file
+    fs.unlinkSync(req.file.path);
+
+    res.json({
+      success: true,
+      message: 'Bulk upload completed',
+      data: results
+    });
+  } catch (error) {
+    console.error('Bulk Upload Timetable Error:', error);
+
+    // Clean up file if it exists
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Failed to process bulk upload'
+    });
   }
 };
 

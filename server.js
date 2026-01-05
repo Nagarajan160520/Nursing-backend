@@ -556,6 +556,7 @@ app.get('/api/student/profile', auth, isStudent, studentController.getProfile);
 app.put('/api/student/profile', auth, isStudent, studentController.updateProfile);
 app.get('/api/student/attendance', auth, isStudent, studentController.getAttendance);
 app.get('/api/student/marks', auth, isStudent, studentController.getMarks);
+app.get('/api/student/timetable', auth, isStudent, studentController.getTimetable);
 app.get('/api/student/clinical-schedule', auth, isStudent, studentController.getClinicalSchedule);
 app.get('/api/student/downloads', auth, isStudent, studentController.getDownloads);
 app.post('/api/student/downloads/:id/record', auth, isStudent, studentController.recordDownload);

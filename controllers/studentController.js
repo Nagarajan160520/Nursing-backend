@@ -3,6 +3,7 @@ const Attendance = require('../models/Attendance');
 const Marks = require('../models/Marks');
 const Download = require('../models/Download');
 const Notification = require('../models/Notification');
+const Timetable = require('../models/Timetable');
 
 // @desc    Get student dashboard data
 // @route   GET /api/student/dashboard
@@ -755,6 +756,63 @@ exports.getClinicalSchedule = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch clinical schedule'
+    });
+  }
+};
+
+// @desc    Get student timetable
+// @route   GET /api/student/timetable
+// @access  Private (Student)
+exports.getTimetable = async (req, res) => {
+  try {
+    const student = await Student.findOne({ userId: req.user._id })
+      .populate('courseEnrolled');
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        message: 'Student profile not found'
+      });
+    }
+
+    // Get timetable for student's course and semester
+    const timetable = await Timetable.find({
+      course: student.courseEnrolled,
+      semester: student.semester,
+      isActive: true
+    })
+    .sort({ day: 1, startTime: 1 })
+    .populate('faculty', 'fullName')
+    .select('-__v');
+
+    // Group by day
+    const timetableByDay = timetable.reduce((acc, session) => {
+      const day = session.day;
+      if (!acc[day]) {
+        acc[day] = [];
+      }
+      acc[day].push(session);
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        timetable,
+        timetableByDay,
+        student: {
+          name: student.fullName,
+          studentId: student.studentId,
+          course: student.courseEnrolled,
+          semester: student.semester
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get Timetable Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch timetable'
     });
   }
 };

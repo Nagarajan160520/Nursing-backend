@@ -96,6 +96,14 @@ router.get('/downloads', adminController.getAllDownloads);
 router.put('/downloads/:id', adminController.updateDownload);
 router.delete('/downloads/:id', adminController.deleteDownload);
 
+// Timetable Management
+router.post('/timetable', adminController.addTimetable);
+router.get('/timetable', adminController.getAllTimetables);
+router.get('/timetable/:id', adminController.getTimetable);
+router.put('/timetable/:id', adminController.updateTimetable);
+router.delete('/timetable/:id', adminController.deleteTimetable);
+router.post('/timetable/bulk-upload', upload.single('file'), adminController.bulkUploadTimetable);
+
 // Settings Management
 router.get('/settings', adminController.getSystemSettings);
 router.put('/settings', adminController.updateSystemSettings);
