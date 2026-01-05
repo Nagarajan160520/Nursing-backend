@@ -242,6 +242,7 @@ eventSchema.virtual('duration').get(function() {
 
 // Virtual for formatted dates
 eventSchema.virtual('formattedStartDate').get(function() {
+  if (!this.startDate) return null;
   return this.startDate.toLocaleDateString('en-IN', {
     weekday: 'long',
     year: 'numeric',
@@ -251,6 +252,7 @@ eventSchema.virtual('formattedStartDate').get(function() {
 });
 
 eventSchema.virtual('formattedEndDate').get(function() {
+  if (!this.endDate) return null;
   return this.endDate.toLocaleDateString('en-IN', {
     weekday: 'long',
     year: 'numeric',
@@ -267,7 +269,8 @@ eventSchema.virtual('registrationStatus').get(function() {
   const now = new Date();
   if (now > this.registrationDeadline) return 'Closed';
   
-  if (this.maxParticipants && this.registeredParticipants.length >= this.maxParticipants) {
+  const participantsLen = Array.isArray(this.registeredParticipants) ? this.registeredParticipants.length : 0;
+  if (this.maxParticipants && participantsLen >= this.maxParticipants) {
     return 'Full';
   }
   
@@ -276,13 +279,13 @@ eventSchema.virtual('registrationStatus').get(function() {
 
 // Virtual for participants count
 eventSchema.virtual('participantsCount').get(function() {
-  return this.registeredParticipants.length;
+  return Array.isArray(this.registeredParticipants) ? this.registeredParticipants.length : 0;
 });
 
 // Virtual for average rating
 eventSchema.virtual('averageRating').get(function() {
-  if (!this.feedback || this.feedback.length === 0) return 0;
-  const total = this.feedback.reduce((sum, item) => sum + item.rating, 0);
+  if (!Array.isArray(this.feedback) || this.feedback.length === 0) return 0;
+  const total = this.feedback.reduce((sum, item) => sum + (item.rating || 0), 0);
   return total / this.feedback.length;
 });
 

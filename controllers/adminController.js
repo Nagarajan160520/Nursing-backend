@@ -614,7 +614,7 @@ exports.addNews = async (req, res) => {
 // @access  Private (Admin)
 exports.getAllNews = async (req, res) => {
   try {
-    const { category, status, search, startDate, endDate } = req.query;
+    const { category, status, search, startDate, endDate, page = 1, limit = 20 } = req.query;
     
     const query = {};
     
@@ -645,22 +645,19 @@ exports.getAllNews = async (req, res) => {
 
     const news = await News.find(query)
       .sort({ publishedAt: -1 })
-      .populate('author', 'username');
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .select('-__v');
 
-    // Get statistics
-    const totalNews = await News.countDocuments();
-    const publishedNews = await News.countDocuments({ isPublished: true });
-    const draftNews = totalNews - publishedNews;
+    const total = await News.countDocuments(query);
 
     res.json({
       success: true,
       data: {
         news,
-        stats: {
-          total: totalNews,
-          published: publishedNews,
-          draft: draftNews
-        }
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
       }
     });
   } catch (error) {
@@ -669,6 +666,164 @@ exports.getAllNews = async (req, res) => {
       success: false,
       message: 'Failed to fetch news'
     });
+  }
+};
+
+// -----------------------
+// Admin Notifications
+// -----------------------
+
+// @desc    Create notification
+// @route   POST /api/admin/notifications
+// @access  Private (Admin)
+exports.addNotification = async (req, res) => {
+  try {
+    const payload = {
+      ...req.body,
+      sender: req.user._id
+    };
+
+    // If targetType is 'all', populate receivers automatically
+    if (payload.targetType === 'all') {
+      const users = await User.find({ isActive: true }).select('_id');
+      payload.receivers = users.map(u => ({ user: u._id, read: false }));
+    } else if (payload.targetType === 'students' || payload.targetType === 'course') {
+      // Support populating receivers by course or student later; for now rely on provided targetIds or manual receivers
+      if (payload.targetIds && payload.targetIds.length > 0) {
+        // If targetModel is Student or Course, find related users
+        if (payload.targetModel === 'Student') {
+          const students = await Student.find({ _id: { $in: payload.targetIds } }).populate('userId');
+          payload.receivers = students.map(s => ({ user: s.userId._id, read: false }));
+        }
+      }
+    }
+
+    const notification = new Notification(payload);
+    await notification.save();
+
+    res.status(201).json({
+      success: true,
+      message: 'Notification created',
+      data: notification
+    });
+  } catch (error) {
+    console.error('Add Notification Error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to create notification'
+    });
+  }
+};
+
+// @desc    Get all notifications
+// @route   GET /api/admin/notifications
+// @access  Private (Admin)
+exports.getAllNotifications = async (req, res) => {
+  try {
+    const { category, priority, status, search, page = 1, limit = 20 } = req.query;
+
+    const query = {};
+    if (category) query.category = category;
+    if (priority) query.priority = priority;
+    if (status === 'active') query.isActive = true;
+    if (status === 'inactive') query.isActive = false;
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { message: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const total = await Notification.countDocuments(query);
+    const notifications = await Notification.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .populate('sender', 'username email')
+      .select('-__v');
+
+    res.json({
+      success: true,
+      data: {
+        notifications,
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get All Notifications Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch notifications'
+    });
+  }
+};
+
+// @desc    Get one notification
+// @route   GET /api/admin/notifications/:id
+// @access  Private (Admin)
+exports.getNotification = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id).populate('sender', 'username email');
+    if (!notification) {
+      return res.status(404).json({ success: false, message: 'Notification not found' });
+    }
+
+    res.json({ success: true, data: notification });
+  } catch (error) {
+    console.error('Get Notification Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch notification' });
+  }
+};
+
+// @desc    Update notification
+// @route   PUT /api/admin/notifications/:id
+// @access  Private (Admin)
+exports.updateNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await Notification.findById(id);
+    if (!notification) {
+      return res.status(404).json({ success: false, message: 'Notification not found' });
+    }
+
+    Object.keys(req.body).forEach(key => {
+      notification[key] = req.body[key];
+    });
+
+    // If set to broadcast to all, populate receivers
+    if (req.body.targetType === 'all' && (!notification.receivers || notification.receivers.length === 0)) {
+      const users = await User.find({ isActive: true }).select('_id');
+      notification.receivers = users.map(u => ({ user: u._id, read: false }));
+    }
+
+    await notification.save();
+
+    res.json({ success: true, message: 'Notification updated', data: notification });
+  } catch (error) {
+    console.error('Update Notification Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update notification' });
+  }
+};
+
+// @desc    Delete notification
+// @route   DELETE /api/admin/notifications/:id
+// @access  Private (Admin)
+exports.deleteNotification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const notification = await Notification.findById(id);
+    if (!notification) {
+      return res.status(404).json({ success: false, message: 'Notification not found' });
+    }
+
+    await notification.remove();
+
+    res.json({ success: true, message: 'Notification deleted' });
+  } catch (error) {
+    console.error('Delete Notification Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete notification' });
   }
 };
 
@@ -793,7 +948,7 @@ exports.checkEmail = async (req, res) => {
     // Check in User collection
     const userExists = await User.findOne({ email: email.toLowerCase() });
     
-    // Check in Student collection (personal email)
+    // Check in Student collection (personal email) 
     const studentExists = await Student.findOne({ 
       personalEmail: email.toLowerCase() 
     });
@@ -2302,6 +2457,7 @@ exports.manageAttendance = async (req, res) => {
     };
 
     // Process each attendance record
+    const affectedStudentIds = new Set();
     for (const record of attendanceData) {
       try {
         const attendance = new Attendance({
@@ -2319,6 +2475,7 @@ exports.manageAttendance = async (req, res) => {
 
         await attendance.save();
         results.success++;
+        affectedStudentIds.add(record.studentId);
       } catch (error) {
         results.failed++;
         results.errors.push({
@@ -2326,6 +2483,23 @@ exports.manageAttendance = async (req, res) => {
           error: error.message
         });
       }
+    }
+
+    // Emit events to affected students and course room
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        // Notify course-level listeners
+        io.to(`course:${course}`).emit('attendance:changed', { date, subject, semester, course });
+
+        // Notify each student's socket (resolve userIds)
+        const studentDocs = await Student.find({ _id: { $in: Array.from(affectedStudentIds) } }).select('userId');
+        studentDocs.forEach(s => {
+          if (s.userId) io.to(`user:${s.userId}`).emit('attendance:changed', { date, subject, semester, course, studentId: s._id });
+        });
+      }
+    } catch (err) {
+      console.error('Emit attendance event error:', err.message);
     }
 
     res.json({
@@ -2365,6 +2539,8 @@ exports.manageMarks = async (req, res) => {
     };
 
     // Process each marks record
+    const affectedStudentIds = new Set();
+    const savedMarks = [];
     for (const record of marksData) {
       try {
         const marks = new Marks({
@@ -2397,7 +2573,9 @@ exports.manageMarks = async (req, res) => {
         });
 
         await marks.save();
+        savedMarks.push(marks);
         results.success++;
+        affectedStudentIds.add(record.studentId);
       } catch (error) {
         results.failed++;
         results.errors.push({
@@ -2405,6 +2583,20 @@ exports.manageMarks = async (req, res) => {
           error: error.message
         });
       }
+    }
+
+    // Emit events to affected students and course room
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`course:${course}`).emit('marks:added', { course, semester, subject, examType });
+        const studentDocs = await Student.find({ _id: { $in: Array.from(affectedStudentIds) } }).select('userId');
+        studentDocs.forEach(s => {
+          if (s.userId) io.to(`user:${s.userId}`).emit('marks:added', { course, semester, subject, examType });
+        });
+      }
+    } catch (err) {
+      console.error('Emit marks event error:', err.message);
     }
 
     res.json({
@@ -2445,6 +2637,16 @@ exports.publishMarks = async (req, res) => {
       }
     );
 
+    // Emit marks published event to course/semester/subject room
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`course:${course}`).emit('marks:published', { course, semester, subject, examType });
+      }
+    } catch (err) {
+      console.error('Emit marks published event error:', err.message);
+    }
+
     res.json({
       success: true,
       message: 'Marks published successfully',
@@ -2461,6 +2663,113 @@ exports.publishMarks = async (req, res) => {
   }
 };
 
+// @desc    Get all marks (admin view)
+// @route   GET /api/admin/marks
+// @access  Private (Admin)
+exports.getAllMarks = async (req, res) => {
+  try {
+    const { course, semester, subject, examType, studentId, page = 1, limit = 50 } = req.query;
+
+    const query = {};
+    if (course) query.course = course;
+    if (semester) query.semester = parseInt(semester);
+    if (subject) query.subject = subject;
+    if (examType) query.examType = examType;
+    if (studentId) query.student = studentId;
+
+    const total = await Marks.countDocuments(query);
+    const marks = await Marks.find(query)
+      .sort({ examDate: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .populate('student', 'fullName studentId')
+      .populate('enteredBy', 'username')
+      .select('-__v');
+
+    res.json({
+      success: true,
+      data: {
+        marks,
+        total,
+        page: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get All Marks Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch marks' });
+  }
+};
+
+// @desc    Get a single mark
+// @route   GET /api/admin/marks/:id
+// @access  Private (Admin)
+exports.getMark = async (req, res) => {
+  try {
+    const mark = await Marks.findById(req.params.id)
+      .populate('student', 'fullName studentId')
+      .populate('enteredBy', 'username');
+    if (!mark) return res.status(404).json({ success: false, message: 'Mark not found' });
+    res.json({ success: true, data: mark });
+  } catch (error) {
+    console.error('Get Mark Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch mark' });
+  }
+};
+
+// @desc    Update a mark
+// @route   PUT /api/admin/marks/:id
+// @access  Private (Admin)
+exports.updateMark = async (req, res) => {
+  try {
+    const mark = await Marks.findById(req.params.id);
+    if (!mark) return res.status(404).json({ success: false, message: 'Mark not found' });
+
+    Object.keys(req.body).forEach(key => {
+      mark[key] = req.body[key];
+    });
+
+    // If marks object provided, merge subfields
+    if (req.body.marks) {
+      mark.marks = { ...mark.marks, ...req.body.marks };
+    }
+
+    await mark.save();
+
+    // Emit mark-updated to the student and course room
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const studentDoc = await Student.findById(mark.student).select('userId');
+        if (studentDoc && studentDoc.userId) io.to(`user:${studentDoc.userId}`).emit('marks:updated', mark);
+        io.to(`course:${mark.course}`).emit('marks:updated', { mark });
+      }
+    } catch (err) {
+      console.error('Emit mark updated error:', err.message);
+    }
+
+    res.json({ success: true, message: 'Mark updated', data: mark });
+  } catch (error) {
+    console.error('Update Mark Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update mark' });
+  }
+};
+
+// @desc    Delete a mark
+// @route   DELETE /api/admin/marks/:id
+// @access  Private (Admin)
+exports.deleteMark = async (req, res) => {
+  try {
+    const mark = await Marks.findById(req.params.id);
+    if (!mark) return res.status(404).json({ success: false, message: 'Mark not found' });
+
+    await mark.remove();
+    res.json({ success: true, message: 'Mark deleted' });
+  } catch (error) {
+    console.error('Delete Mark Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete mark' });
+  }
+};
 // Helper function to get file type
 const getFileType = (mimeType) => {
   const types = {
@@ -2517,6 +2826,22 @@ exports.uploadStudyMaterial = async (req, res) => {
 
     const download = new Download(downloadData);
     await download.save();
+
+    // Emit real-time event to students (and course rooms if specific targets set)
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        io.to('students').emit('downloads:created', download);
+        if (download.targetAudience && Array.isArray(download.targetAudience) && download.targetAudience.includes('specific_course')) {
+          const courses = download.specificTargets?.courses || [];
+          courses.forEach(courseId => {
+            io.to(`course:${courseId}`).emit('downloads:created', download);
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Emit downloads event error:', err.message);
+    }
 
     res.status(201).json({
       success: true,

@@ -12,6 +12,10 @@ const cookieParser = require('cookie-parser');
 const morgan = require('morgan');
 const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const { Server } = require('socket.io');
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
+const Student = require('./models/Student');
 
 // Load environment variables
 dotenv.config();
@@ -60,11 +64,33 @@ app.use(helmet({
   }
 })); // Set security HTTP headers (configured for cross-origin images)
 
-// Rate limiting
+// CORS - allow local dev origins and preflight before any other middleware
+const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'].filter(Boolean);
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow non-browser requests (Postman, server-to-server) with no origin
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Cache-Control'] ,
+  optionsSuccessStatus: 204
+}));
+
+// Ensure preflight requests are handled
+app.options('*', cors());
+
+// Rate limiting (apply after CORS so preflight is allowed)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000,
-  message: 'Too many requests from this IP, please try again later.'
+  // Increase local dev limit to avoid dev-time 429s, keep stricter limits in production
+  max: process.env.NODE_ENV === 'development' ? 5000 : 1000,
+  message: 'Too many requests from this IP, please try again later.',
+  // Provide standardized rate limit headers and disable legacy headers
+  standardHeaders: true,
+  legacyHeaders: false
 });
 app.use('/api', limiter);
 
@@ -82,15 +108,7 @@ app.use(xss());
 // Prevent parameter pollution
 app.use(hpp());
 
-// ====================
-// CORS CONFIGURATION
-// ====================
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-}));
+// CORS configuration moved earlier to ensure preflight requests are handled before rate limiting
 
 // Handle preflight requests
 app.options('*', cors());
@@ -118,6 +136,12 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   }
 }));
+
+// Provide a small inline SVG fallback for missing default profile image to avoid 404 noise in dev
+app.get('/uploads/profile/default.jpg', (req, res) => {
+  res.type('image/svg+xml');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="100%" height="100%" fill="#e9ecef"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6c757d">Profile</text></svg>`);
+});
 
 // Serve frontend static images (used by placeholder previews)
 const frontendImagesPath = path.join(__dirname, '..', 'frontend', 'public', 'images');
@@ -822,6 +846,68 @@ const server = app.listen(PORT, async () => {
   } catch (error) {
     console.error('❌ Failed to start server:', error);
     process.exit(1);
+  }
+});
+
+// Initialize Socket.IO for real-time updates
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// Make io available via app so controllers can emit events
+app.set('io', io);
+
+const jwtSecret = process.env.JWT_SECRET || 'your-secret-key';
+
+io.on('connection', async (socket) => {
+  try {
+    const token = socket.handshake.auth?.token || (socket.handshake.headers && socket.handshake.headers.authorization && socket.handshake.headers.authorization.split(' ')[1]) || socket.handshake.query?.token;
+    if (!token) {
+      socket.disconnect(true);
+      return;
+    }
+
+    const decoded = jwt.verify(token, jwtSecret);
+    const user = await User.findById(decoded.userId).select('-password');
+
+    if (!user) {
+      socket.disconnect(true);
+      return;
+    }
+
+    // Attach user to socket and join default rooms
+    socket.user = user;
+
+    if (user.role === 'student') {
+      socket.join('students');
+      socket.join(`user:${user._id}`);
+
+      // Add course/year/semester rooms if available
+      const student = await Student.findOne({ userId: user._id }).populate('courseEnrolled');
+      if (student) {
+        if (student.courseEnrolled) socket.join(`course:${student.courseEnrolled._id}`);
+        if (student.batchYear) socket.join(`year:${student.batchYear}`);
+        if (student.semester !== undefined && student.semester !== null) socket.join(`semester:${student.semester}`);
+      }
+    } else if (user.role === 'admin') {
+      socket.join('admins');
+      socket.join(`admin:${user._id}`);
+    } else if (user.role === 'faculty') {
+      socket.join('faculty');
+    }
+
+    console.log(`Socket connected: ${user.username} (${user.role})`);
+
+    socket.on('disconnect', () => {
+      console.log(`Socket disconnected: ${user.username}`);
+    });
+  } catch (err) {
+    console.error('Socket connection error:', err.message);
+    socket.disconnect(true);
   }
 });
 

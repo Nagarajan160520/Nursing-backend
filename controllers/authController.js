@@ -5,7 +5,7 @@ const Admin = require('../models/Admin');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const sendEmail = require('../utils/sendEmail');
-
+ 
 // @desc    Register user
 // @route   POST /api/auth/register
 // @access  Public

@@ -53,10 +53,26 @@ exports.getDashboard = async (req, res) => {
       (presentSessions / totalSessions) * 100 : 0;
 
     // Get recent marks
-    const recentMarks = await Marks.find({ student: student._id })
+    const recentMarks = await Marks.find({ student: student._1?._id ? student._id : student._id })
       .sort({ examDate: -1 })
       .limit(5)
       .select('subject examType marks.obtained percentage grade');
+
+    // Compute average internal marks (percentage) across all marks for the student
+    const allMarks = await Marks.find({ student: student._id }).select('totalMarks percentage');
+    let internalMarksAvg = 0;
+    if (Array.isArray(allMarks) && allMarks.length > 0) {
+      const sumPercent = allMarks.reduce((sum, m) => {
+        if (m.totalMarks && m.totalMarks.max) {
+          return sum + ((m.totalMarks.obtained || 0) / m.totalMarks.max) * 100;
+        }
+        if (typeof m.percentage === 'number') {
+          return sum + m.percentage;
+        }
+        return sum;
+      }, 0);
+      internalMarksAvg = Math.round((sumPercent / allMarks.length) * 100) / 100;
+    }
 
     // Get pending assignments/notices
     const notifications = await Notification.find({
@@ -87,6 +103,7 @@ exports.getDashboard = async (req, res) => {
         student,
         stats: {
           overallAttendance: Math.round(overallAttendance * 100) / 100,
+          internalMarks: internalMarksAvg,
           totalSubjects: attendanceSummary.length,
           pendingAssignments: notifications.filter(n => n.category === 'Academic').length,
           upcomingEvents: upcomingPostings.length

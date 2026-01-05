@@ -4,7 +4,7 @@ const adminController = require('../controllers/adminController');
 const userController = require('../controllers/userController');
 const { auth, isAdmin } = require('../middleware/auth');
 const upload = require('../middleware/upload');
-
+const contactController = require('../controllers/contactController');
 // Apply auth and admin middleware to all routes
 router.use(auth, isAdmin);
 
@@ -38,6 +38,13 @@ router.post('/news', upload.array('attachments', 5), adminController.addNews);
 router.get('/news', adminController.getAllNews);
 router.put('/news/:id', adminController.updateNews);
 router.delete('/news/:id', adminController.deleteNews);
+
+// Notifications Management
+router.post('/notifications', adminController.addNotification);
+router.get('/notifications', adminController.getAllNotifications);
+router.get('/notifications/:id', adminController.getNotification);
+router.put('/notifications/:id', adminController.updateNotification);
+router.delete('/notifications/:id', adminController.deleteNotification);
 
 // ✅ **CRITICAL - Student Management Routes MUST be added:**
 router.post('/students', adminController.addStudent);
@@ -77,6 +84,10 @@ router.delete('/faculty/:id', adminController.deleteFaculty);
 
 // Marks Management
 router.post('/marks', adminController.manageMarks);
+router.get('/marks', adminController.getAllMarks);
+router.get('/marks/:id', adminController.getMark);
+router.put('/marks/:id', adminController.updateMark);
+router.delete('/marks/:id', adminController.deleteMark);
 router.put('/marks/publish', adminController.publishMarks);
  
 // Content Management
@@ -92,4 +103,11 @@ router.post('/settings/reset', adminController.resetSystemSettings);
 router.post('/clear-cache', adminController.clearCache);
 router.get('/system-check', adminController.systemCheck);
 
+// Add these lines in admin routes:
+router.get('/contacts', contactController.getAllContacts);
+router.get('/contacts/stats', contactController.getContactStats);
+router.get('/contacts/:id', contactController.getContactById);
+router.put('/contacts/:id/status', contactController.updateContactStatus);
+router.post('/contacts/:id/notes', contactController.addContactNote);
+router.post('/contacts/:id/reply', contactController.replyToContact);
 module.exports = router; 
