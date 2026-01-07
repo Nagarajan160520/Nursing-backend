@@ -13,7 +13,7 @@ const timetableSchema = new mongoose.Schema({
     max: 8
   },
   day: {
-    type: String,
+    type: String, 
     enum: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
     required: true
   },

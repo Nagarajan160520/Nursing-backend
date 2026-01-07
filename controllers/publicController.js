@@ -602,14 +602,23 @@ exports.getFacultyDetails = async (req, res) => {
   }
 };
 
+const Contact = require('../models/Contact');
+const nodemailer = require('nodemailer');
+const validator = require('validator');
+
 // @desc    Submit contact form
+// @route   POST /api/public/contact
+// @access  Public
+// @desc    Submit contact form (FIXED VERSION)
 // @route   POST /api/public/contact
 // @access  Public
 exports.submitContactForm = async (req, res) => {
   try {
-    const { name, email, phone, subject, message } = req.body;
+    const { name, email, phone, subject, message, category } = req.body;
 
-    // Validate input
+    console.log('Contact form data:', { name, email, subject, category });
+
+    // Basic validation
     if (!name || !email || !subject || !message) {
       return res.status(400).json({
         success: false,
@@ -617,7 +626,7 @@ exports.submitContactForm = async (req, res) => {
       });
     }
 
-    // Validate email
+    // Simple email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({
@@ -626,26 +635,62 @@ exports.submitContactForm = async (req, res) => {
       });
     }
 
-    // TODO: Send email to admin
-    // await sendContactEmail({ name, email, phone, subject, message });
+    // Normalize data for MongoDB
+    const contactData = {
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone ? phone.trim() : '',
+      subject: subject.trim(),
+      message: message.trim(),
+      category: (category || 'general').toLowerCase(),
+      status: 'pending',
+      priority: 'medium',
+      source: 'website'
+    };
 
-    // TODO: Save to database if needed
-    // const contactForm = new ContactForm({ name, email, phone, subject, message });
-    // await contactForm.save();
+    console.log('Normalized contact data:', contactData);
 
-    res.json({
+    // Save to database
+    const Contact = require('../models/Contact');
+    const contact = new Contact(contactData);
+    await contact.save();
+
+    console.log('✅ Contact saved to database with ID:', contact._id);
+
+    res.status(201).json({
       success: true,
-      message: 'Thank you for your message. We will get back to you soon.'
+      message: 'Thank you for your message! We will get back to you within 24-48 hours.',
+      data: {
+        contactId: contact._id,
+        timestamp: new Date().toISOString()
+      }
     });
+
   } catch (error) {
-    console.error('Submit Contact Form Error:', error);
+    console.error('Contact form error details:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => ({
+        field: err.path,
+        message: err.message
+      }));
+      
+      return res.status(400).json({
+        success: false,
+        message: 'Form validation failed',
+        errors
+      });
+    }
+
+    // Handle other errors
     res.status(500).json({
       success: false,
-      message: 'Failed to submit contact form'
+      message: 'Failed to submit contact form. Please try again later.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 };
-
 // @desc    Get about us information
 // @route   GET /api/public/about
 // @access  Public

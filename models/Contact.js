@@ -27,24 +27,19 @@ const contactSchema = new mongoose.Schema({
     required: [true, 'Message is required'],
     trim: true
   },
-  status: {
-    type: String,
-    enum: ['pending', 'read', 'replied', 'archived', 'spam'],
-    default: 'pending'
-  },
-  source: {
-    type: String,
-    enum: ['website', 'phone', 'email', 'walkin'],
-    default: 'website'
-  },
   category: {
     type: String,
-    enum: ['general', 'admission', 'course', 'complaint', 'suggestion', 'feedback', 'other'],
+    enum: ['general', 'admission', 'course', 'fee', 'complaint', 'suggestion', 'other'],
     default: 'general'
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'read', 'replied', 'resolved', 'archived'],
+    default: 'pending'
   },
   priority: {
     type: String,
-    enum: ['low', 'medium', 'high', 'urgent'],
+    enum: ['low', 'medium', 'high'],
     default: 'medium'
   },
   assignedTo: {
@@ -66,17 +61,28 @@ const contactSchema = new mongoose.Schema({
     ref: 'User'
   },
   readAt: Date,
-  metadata: {
-    ipAddress: String,
-    userAgent: String,
-    pageUrl: String,
-    referrer: String
+  ipAddress: String,
+  userAgent: String,
+  source: {
+    type: String,
+    default: 'website'
   },
   attachments: [{
     filename: String,
     fileUrl: String,
     fileType: String,
     fileSize: Number
+  }],
+  notes: [{
+    note: String,
+    addedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    addedAt: {
+      type: Date,
+      default: Date.now
+    }
   }]
 }, {
   timestamps: true,
@@ -101,11 +107,7 @@ contactSchema.index({ status: 1 });
 contactSchema.index({ priority: 1 });
 contactSchema.index({ createdAt: -1 });
 contactSchema.index({ email: 1 });
+contactSchema.index({ category: 1 });
 contactSchema.index({ isRead: 1 });
-
-// Static method to get unread count
-contactSchema.statics.getUnreadCount = async function() {
-  return await this.countDocuments({ isRead: false });
-};
 
 module.exports = mongoose.model('Contact', contactSchema);

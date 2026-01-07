@@ -224,16 +224,7 @@ exports.deleteCourse = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if course has enrolled students
-    const enrolledStudents = await Student.countDocuments({ courseEnrolled: id });
-    if (enrolledStudents > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete course with enrolled students'
-      });
-    }
-
-    const course = await Course.findByIdAndDelete(id);
+    const course = await Course.findById(id);
     if (!course) {
       return res.status(404).json({
         success: false,
@@ -241,9 +232,21 @@ exports.deleteCourse = async (req, res) => {
       });
     }
 
+    // Update enrolled students to remove course reference
+    await Student.updateMany(
+      { courseEnrolled: id },
+      {
+        $unset: { courseEnrolled: 1 },
+        $set: { academicStatus: 'Course Discontinued' }
+      }
+    );
+
+    // Delete the course
+    await Course.findByIdAndDelete(id);
+
     res.json({
       success: true,
-      message: 'Course deleted successfully'
+      message: 'Course deleted successfully. Enrolled students have been updated.'
     });
   } catch (error) {
     console.error('Delete Course Error:', error);
@@ -2818,8 +2821,14 @@ exports.manageMarks = async (req, res) => {
     const savedMarks = [];
     for (const record of marksData) {
       try {
+        // Find student by studentId
+        const student = await Student.findOne({ studentId: record.studentId });
+        if (!student) {
+          throw new Error(`Student with ID ${record.studentId} not found`);
+        }
+
         const marks = new Marks({
-          student: record.studentId,
+          student: student._id,
           course,
           subject,
           semester: parseInt(semester),
@@ -2850,7 +2859,7 @@ exports.manageMarks = async (req, res) => {
         await marks.save();
         savedMarks.push(marks);
         results.success++;
-        affectedStudentIds.add(record.studentId);
+        affectedStudentIds.add(student._id);
       } catch (error) {
         results.failed++;
         results.errors.push({
@@ -4057,19 +4066,614 @@ exports.bulkUploadTimetable = async (req, res) => {
   }
 };
 
+// @desc    Get all contacts (admin)
+// @route   GET /api/admin/contacts
+// @access  Private (Admin)
+exports.getAllContacts = async (req, res) => {
+  try {
+    const {
+      status,
+      category,
+      priority,
+      search,
+      startDate,
+      endDate,
+      assignedTo,
+      page = 1,
+      limit = 20,
+      sortBy = 'createdAt',
+      sortOrder = 'desc'
+    } = req.query;
+
+    const query = {};
+
+    // Filters
+    if (status) query.status = status;
+    if (category) query.category = category;
+    if (priority) query.priority = priority;
+    if (assignedTo) query.assignedTo = assignedTo;
+
+    // Date range filter
+    if (startDate && endDate) {
+      query.createdAt = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    }
+
+    // Search filter
+    if (search) {
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { subject: { $regex: search, $options: 'i' } },
+        { message: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    // Pagination
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    // Execute query
+    const [contacts, total] = await Promise.all([
+      Contact.find(query)
+        .populate('assignedTo', 'username email')
+        .populate('repliedBy', 'username')
+        .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Contact.countDocuments(query)
+    ]);
+
+    // Get statistics
+    const stats = await Contact.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const categoryStats = await Contact.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        contacts,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit))
+        },
+        stats: {
+          byStatus: stats,
+          byCategory: categoryStats,
+          totalContacts: total,
+          newContacts: await Contact.countDocuments({ status: 'New' }),
+          resolvedContacts: await Contact.countDocuments({ status: 'Resolved' })
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get All Contacts Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch contacts'
+    });
+  }
+};
+
+// @desc    Get contact by ID
+// @route   GET /api/admin/contacts/:id
+// @access  Private (Admin)
+exports.getContactById = async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id)
+      .populate('assignedTo', 'username email')
+      .populate('repliedBy', 'username')
+      .populate('notes.addedBy', 'username');
+
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contact not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: contact
+    });
+
+  } catch (error) {
+    console.error('Get Contact By ID Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch contact'
+    });
+  }
+};
+
+// @desc    Update contact status
+// @route   PUT /api/admin/contacts/:id/status
+// @access  Private (Admin)
+exports.updateContactStatus = async (req, res) => {
+  try {
+    const { status, assignedTo } = req.body;
+    const contact = await Contact.findById(req.params.id);
+
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contact not found'
+      });
+    }
+
+    contact.status = status || contact.status;
+    if (assignedTo) contact.assignedTo = assignedTo;
+
+    await contact.save();
+
+    res.json({
+      success: true,
+      message: 'Contact status updated successfully',
+      data: contact
+    });
+
+  } catch (error) {
+    console.error('Update Contact Status Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update contact status'
+    });
+  }
+};
+
+// @desc    Add note to contact
+// @route   POST /api/admin/contacts/:id/notes
+// @access  Private (Admin)
+exports.addContactNote = async (req, res) => {
+  try {
+    const { note } = req.body;
+    const contact = await Contact.findById(req.params.id);
+
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contact not found'
+      });
+    }
+
+    contact.notes.push({
+      note,
+      addedBy: req.user._id
+    });
+
+    await contact.save();
+
+    res.json({
+      success: true,
+      message: 'Note added successfully',
+      data: contact.notes[contact.notes.length - 1]
+    });
+
+  } catch (error) {
+    console.error('Add Contact Note Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to add note'
+    });
+  }
+};
+
+// @desc    Reply to contact
+// @route   POST /api/admin/contacts/:id/reply
+// @access  Private (Admin)
+exports.replyToContact = async (req, res) => {
+  try {
+    const { replyMessage } = req.body;
+    const contact = await Contact.findById(req.params.id);
+
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contact not found'
+      });
+    }
+
+    // Send email reply
+    await sendReplyEmail(contact.email, contact.name, contact.subject, replyMessage);
+
+    // Update contact record
+    contact.replied = true;
+    contact.replyMessage = replyMessage;
+    contact.repliedBy = req.user._id;
+    contact.repliedAt = new Date();
+    contact.status = 'Resolved';
+
+    await contact.save();
+
+    res.json({
+      success: true,
+      message: 'Reply sent successfully',
+      data: contact
+    });
+
+  } catch (error) {
+    console.error('Reply To Contact Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send reply'
+    });
+  }
+};
+
+// @desc    Get contact statistics
+// @route   GET /api/admin/contacts/stats
+// @access  Private (Admin)
+exports.getContactStats = async (req, res) => {
+  try {
+    // Daily contacts for last 30 days
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const dailyContacts = await Contact.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: thirtyDaysAgo }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      }
+    ]);
+
+    // Category distribution
+    const categoryDistribution = await Contact.aggregate([
+      {
+        $group: {
+          _id: '$category',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      }
+    ]);
+
+    // Status distribution
+    const statusDistribution = await Contact.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Average response time
+    const responseTimeStats = await Contact.aggregate([
+      {
+        $match: {
+          replied: true,
+          repliedAt: { $exists: true }
+        }
+      },
+      {
+        $addFields: {
+          responseHours: {
+            $divide: [
+              { $subtract: ["$repliedAt", "$createdAt"] },
+              1000 * 60 * 60
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          avgResponseTime: { $avg: "$responseHours" },
+          minResponseTime: { $min: "$responseHours" },
+          maxResponseTime: { $max: "$responseHours" }
+        }
+      }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        dailyContacts,
+        categoryDistribution,
+        statusDistribution,
+        responseTime: responseTimeStats[0] || {
+          avgResponseTime: 0,
+          minResponseTime: 0,
+          maxResponseTime: 0
+        },
+        summary: {
+          total: await Contact.countDocuments(),
+          new: await Contact.countDocuments({ status: 'New' }),
+          resolved: await Contact.countDocuments({ status: 'Resolved' }),
+          replied: await Contact.countDocuments({ replied: true })
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get Contact Stats Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch contact statistics'
+    });
+  }
+};
+
+// Email sending functions
+const sendReplyEmail = async (to, name, subject, replyMessage) => {
+  try {
+    const transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST,
+      port: process.env.EMAIL_PORT,
+      secure: process.env.EMAIL_PORT === '465',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    const mailOptions = {
+      from: `"Nursing Institute Support" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: `Re: ${subject}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2c3e50;">Response from Nursing Institute</h2>
+          <p>Dear ${name},</p>
+          <p>Thank you for contacting us. Here is our response to your inquiry:</p>
+          <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #3498db;">
+            ${replyMessage}
+          </div>
+          <p>If you have any further questions, please don't hesitate to contact us again.</p>
+          <p>Best regards,<br>Nursing Institute Support Team</p>
+          <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+          <p style="font-size: 12px; color: #7f8c8d;">
+            This is an automated response. Please do not reply to this email.
+          </p>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`Reply email sent to ${to}`);
+  } catch (error) {
+    console.error('Reply email error:', error);
+    throw new Error('Failed to send reply email');
+  }
+};
+
 // @desc    Run basic system checks
 // @route   GET /api/admin/system-check
 // @access  Private (Admin)
 exports.systemCheck = async (req, res) => {
   try {
-    // Perform simple checks (DB connection, disk space, etc.) - placeholder implementation
     const issues = [];
-    // Example check placeholders (expand as needed)
-    // if (!db.isConnected) issues.push({name: 'Database', severity: 'critical', message: 'DB not connected'});
+    const checks = {
+      database: false,
+      filesystem: false,
+      environment: false,
+      diskSpace: false,
+      memory: false
+    };
 
-    res.json({ success: true, data: { issues } });
+    // 1. Database Connection Check
+    try {
+      await mongoose.connection.db.admin().ping();
+      checks.database = true;
+    } catch (error) {
+      issues.push({
+        name: 'Database',
+        severity: 'critical',
+        message: 'Database connection failed',
+        details: error.message
+      });
+    }
+
+    // 2. File System Checks
+    try {
+      const uploadDir = path.join(__dirname, '../../uploads');
+      const dirs = [
+        uploadDir,
+        path.join(uploadDir, 'gallery'),
+        path.join(uploadDir, 'documents'),
+        path.join(uploadDir, 'news')
+      ];
+
+      for (const dir of dirs) {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+
+        // Check if directory is writable
+        try {
+          fs.accessSync(dir, fs.constants.W_OK);
+        } catch (error) {
+          issues.push({
+            name: 'File System',
+            severity: 'high',
+            message: `Directory not writable: ${dir}`,
+            details: error.message
+          });
+        }
+      }
+      checks.filesystem = true;
+    } catch (error) {
+      issues.push({
+        name: 'File System',
+        severity: 'high',
+        message: 'File system check failed',
+        details: error.message
+      });
+    }
+
+    // 3. Environment Variables Check
+    try {
+      const requiredEnvVars = [
+        'NODE_ENV',
+        'MONGODB_URI',
+        'JWT_SECRET',
+        'EMAIL_USER',
+        'EMAIL_PASS'
+      ];
+
+      const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+      if (missingVars.length > 0) {
+        issues.push({
+          name: 'Environment',
+          severity: 'high',
+          message: `Missing environment variables: ${missingVars.join(', ')}`,
+          details: 'Some required environment variables are not set'
+        });
+      } else {
+        checks.environment = true;
+      }
+    } catch (error) {
+      issues.push({
+        name: 'Environment',
+        severity: 'medium',
+        message: 'Environment check failed',
+        details: error.message
+      });
+    }
+
+    // 4. Disk Space Check
+    try {
+      const diskUsage = require('diskusage');
+      const { available, total } = await diskUsage.check(__dirname);
+
+      const availableGB = (available / (1024 * 1024 * 1024)).toFixed(2);
+      const totalGB = (total / (1024 * 1024 * 1024)).toFixed(2);
+      const usagePercent = (((total - available) / total) * 100).toFixed(2);
+
+      if (available < 1024 * 1024 * 1024) { // Less than 1GB
+        issues.push({
+          name: 'Disk Space',
+          severity: 'high',
+          message: `Low disk space: ${availableGB} GB available`,
+          details: `Total: ${totalGB} GB, Used: ${usagePercent}%`
+        });
+      } else if (available < 5 * 1024 * 1024 * 1024) { // Less than 5GB
+        issues.push({
+          name: 'Disk Space',
+          severity: 'medium',
+          message: `Running low on disk space: ${availableGB} GB available`,
+          details: `Total: ${totalGB} GB, Used: ${usagePercent}%`
+        });
+      } else {
+        checks.diskSpace = true;
+      }
+    } catch (error) {
+      // diskusage module might not be available, skip this check
+      console.log('Disk space check skipped:', error.message);
+    }
+
+    // 5. Memory Usage Check
+    try {
+      const memUsage = process.memoryUsage();
+      const usedMB = (memUsage.heapUsed / 1024 / 1024).toFixed(2);
+      const totalMB = (memUsage.heapTotal / 1024 / 1024).toFixed(2);
+      const usagePercent = ((memUsage.heapUsed / memUsage.heapTotal) * 100).toFixed(2);
+
+      if (usagePercent > 90) {
+        issues.push({
+          name: 'Memory',
+          severity: 'high',
+          message: `High memory usage: ${usagePercent}%`,
+          details: `Used: ${usedMB} MB, Total: ${totalMB} MB`
+        });
+      } else if (usagePercent > 80) {
+        issues.push({
+          name: 'Memory',
+          severity: 'medium',
+          message: `Moderate memory usage: ${usagePercent}%`,
+          details: `Used: ${usedMB} MB, Total: ${totalMB} MB`
+        });
+      } else {
+        checks.memory = true;
+      }
+    } catch (error) {
+      issues.push({
+        name: 'Memory',
+        severity: 'low',
+        message: 'Memory check failed',
+        details: error.message
+      });
+    }
+
+    // 6. System Uptime
+    const uptime = process.uptime();
+    const uptimeHours = (uptime / 3600).toFixed(2);
+
+    // 7. Node.js Version
+    const nodeVersion = process.version;
+
+    // 8. Platform Info
+    const os = require('os');
+    const platform = os.platform();
+    const arch = os.arch();
+    const cpus = os.cpus().length;
+
+    // Determine overall health
+    const criticalIssues = issues.filter(issue => issue.severity === 'critical').length;
+    const highIssues = issues.filter(issue => issue.severity === 'high').length;
+
+    let overallHealth = 'healthy';
+    if (criticalIssues > 0) {
+      overallHealth = 'critical';
+    } else if (highIssues > 0) {
+      overallHealth = 'warning';
+    }
+
+    res.json({
+      success: true,
+      data: {
+        overallHealth,
+        issues,
+        checks,
+        systemInfo: {
+          uptime: `${uptimeHours} hours`,
+          nodeVersion,
+          platform: `${platform} ${arch}`,
+          cpus: `${cpus} CPU cores`,
+          memory: `${(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)} GB total`,
+          timestamp: new Date().toISOString()
+        }
+      }
+    });
   } catch (error) {
     console.error('System Check Error:', error);
-    res.status(500).json({ success: false, message: 'System check failed' });
+    res.status(500).json({
+      success: false,
+      message: 'System check failed',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };

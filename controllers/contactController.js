@@ -2,6 +2,159 @@ const Contact = require('../models/Contact');
 const nodemailer = require('nodemailer');
 const validator = require('validator');
 
+
+
+
+// @desc    Submit contact form (SIMPLE WORKING VERSION)
+// @route   POST /api/public/contact
+// @access  Public
+exports.submitContactForm = async (req, res) => {
+  try {
+    const { name, email, phone, subject, message, category } = req.body;
+
+    console.log('📨 Contact form submission:', { name, email, subject });
+
+    // Basic validation
+    if (!name || !email || !subject || !message) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please fill all required fields'
+      });
+    }
+
+    // Simple email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a valid email address'
+      });
+    }
+
+    // Normalize category to lowercase
+    const normalizedCategory = category ? category.toLowerCase() : 'general';
+    
+    // Create contact entry with proper enum values
+    const contactData = {
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      phone: phone ? phone.trim() : '',
+      subject: subject.trim(),
+      message: message.trim(),
+      category: normalizedCategory,
+      status: 'pending',
+      priority: 'medium',
+      source: 'website',
+      ipAddress: req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+      userAgent: req.headers['user-agent']
+    };
+
+    console.log('📝 Creating contact with data:', contactData);
+
+    // Create and save contact
+    const contact = new Contact(contactData);
+    await contact.save();
+
+    console.log('✅ Contact saved successfully with ID:', contact._id);
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      message: 'Thank you for your message! We will get back to you within 24-48 hours.',
+      data: {
+        contactId: contact._id,
+        reference: `CONTACT-${contact._id.toString().slice(-8).toUpperCase()}`,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Contact form error details:', error);
+    
+    // Check if it's a validation error
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: messages
+      });
+    }
+
+    // Database connection error
+    if (error.name === 'MongoError' || error.name === 'MongoServerError') {
+      return res.status(503).json({
+        success: false,
+        message: 'Database connection issue. Please try again later.'
+      });
+    }
+
+    // Generic error
+    res.status(500).json({
+      success: false,
+      message: 'Something went wrong. Please try again or contact us directly.',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
+
+
+// @desc    Get contact by ID
+// @route   GET /api/admin/contacts/:id
+// @access  Private (Admin)
+exports.getContactById = async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id);
+    
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contact not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: contact
+    });
+
+  } catch (error) {
+    console.error('Get contact error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch contact'
+    });
+  }
+};
+
+
+// @desc    Delete contact
+// @route   DELETE /api/admin/contacts/:id
+// @access  Private (Admin)
+exports.deleteContact = async (req, res) => {
+  try {
+    const contact = await Contact.findByIdAndDelete(req.params.id);
+    
+    if (!contact) {
+      return res.status(404).json({
+        success: false,
+        message: 'Contact not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Contact deleted successfully'
+    });
+
+  } catch (error) {
+    console.error('Delete contact error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete contact'
+    });
+  }
+};
 // @desc    Submit contact form
 // @route   POST /api/contact
 // @access  Public
