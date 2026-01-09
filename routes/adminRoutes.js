@@ -5,6 +5,7 @@ const userController = require('../controllers/userController');
 const { auth, isAdmin } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const contactController = require('../controllers/contactController');
+const notificationController = require('../controllers/notificationController');
 // Apply auth and admin middleware to all routes
 router.use(auth, isAdmin);
 
@@ -39,15 +40,18 @@ router.get('/news', adminController.getAllNews);
 router.put('/news/:id', adminController.updateNews);
 router.delete('/news/:id', adminController.deleteNews);
 
+
 // Notifications Management
-router.post('/notifications', adminController.addNotification);
-router.get('/notifications', adminController.getAllNotifications);
-router.get('/notifications/:id', adminController.getNotification);
-router.put('/notifications/:id', adminController.updateNotification);
-router.delete('/notifications/:id', adminController.deleteNotification);
+router.post('/notifications', notificationController.createNotification);
+router.get('/notifications', notificationController.getAllNotifications);
+router.get('/notifications/:id', notificationController.getNotificationById);
+router.put('/notifications/:id', notificationController.updateNotification);
+router.delete('/notifications/:id', notificationController.deleteNotification);
+router.post('/notifications/:id/send', notificationController.sendNotificationNow);
+router.get('/notifications/stats', notificationController.getNotificationStats);
 
 // ✅ **CRITICAL - Student Management Routes MUST be added:**
-router.post('/students', adminController.addStudent);
+router.post('/students', adminController.addStudent);  
 router.get('/students', adminController.getAllStudents);
 
 // ✅ **Essential Validation Routes:**
@@ -85,11 +89,14 @@ router.post('/attendance/bulk', upload.single('file'), adminController.bulkUploa
 // Marks Management
 router.post('/marks', adminController.manageMarks);
 router.get('/marks', adminController.getAllMarks);
+router.get('/marks/stats', adminController.getMarksStats);
+router.put('/marks/publish', adminController.publishMarks);
+// Parameterized routes after specific ones
 router.get('/marks/:id', adminController.getMark);
 router.put('/marks/:id', adminController.updateMark);
 router.delete('/marks/:id', adminController.deleteMark);
-router.put('/marks/publish', adminController.publishMarks);
- 
+
+
 // Content Management
 router.post('/downloads', upload.single('file'), adminController.uploadStudyMaterial);
 router.get('/downloads', adminController.getAllDownloads);

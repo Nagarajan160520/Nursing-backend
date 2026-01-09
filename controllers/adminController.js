@@ -15,6 +15,7 @@ const sendEmail = require('../utils/sendEmail');
 const fs = require('fs');
 const nodemailer = require('nodemailer');
 
+
 // @desc    Get admin dashboard statistics
 // @route   GET /api/admin/dashboard/stats
 // @access  Private (Admin)
@@ -2798,103 +2799,273 @@ exports.bulkUploadAttendance = async (req, res) => {
 // @route   POST /api/admin/marks
 // @access  Private (Admin)
 exports.manageMarks = async (req, res) => {
-  try {
-    const { examType, course, semester, subject, marksData } = req.body;
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    
+    try {
+        const { 
+            examType, 
+            course, 
+            semester, 
+            subject, 
+            theoryMax = 100, 
+            practicalMax = 100, 
+            vivaMax = 50, 
+            assignmentMax = 50, 
+            marksData,
+            sendSMS = false 
+        } = req.body;
 
-    // Validate input
-    if (!examType || !course || !semester || !subject || !marksData) {
-      return res.status(400).json({
-        success: false,
-        message: 'Missing required fields'
-      });
-    }
-
-    const results = {
-      total: marksData.length,
-      success: 0,
-      failed: 0,
-      errors: []
-    };
-
-    // Process each marks record
-    const affectedStudentIds = new Set();
-    const savedMarks = [];
-    for (const record of marksData) {
-      try {
-        // Find student by studentId
-        const student = await Student.findOne({ studentId: record.studentId });
-        if (!student) {
-          throw new Error(`Student with ID ${record.studentId} not found`);
+        // Validate input
+        if (!examType || !course || !semester || !subject || !marksData) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required fields'
+            });
         }
 
-        const marks = new Marks({
-          student: student._id,
-          course,
-          subject,
-          semester: parseInt(semester),
-          examType,
-          examDate: new Date(),
-          marks: {
-            theory: {
-              max: record.theoryMax || 100,
-              obtained: record.theoryObtained || 0
-            },
-            practical: {
-              max: record.practicalMax || 100,
-              obtained: record.practicalObtained || 0
-            },
-            viva: {
-              max: record.vivaMax || 50,
-              obtained: record.vivaObtained || 0
-            },
-            assignment: {
-              max: record.assignmentMax || 50,
-              obtained: record.assignmentObtained || 0
+        // Find course
+        let courseDoc;
+        if (mongoose.Types.ObjectId.isValid(course)) {
+            courseDoc = await Course.findById(course);
+        } else {
+            courseDoc = await Course.findOne({ 
+                $or: [
+                    { courseCode: course.toUpperCase() },
+                    { courseName: { $regex: course, $options: 'i' } }
+                ]
+            });
+        }
+
+        if (!courseDoc) {
+            return res.status(404).json({
+                success: false,
+                message: 'Course not found'
+            });
+        }
+
+        const results = {
+            total: marksData.length,
+            success: 0,
+            failed: 0,
+            smsSent: 0,
+            smsFailed: 0,
+            errors: [],
+            smsResults: []
+        };
+
+        const savedMarks = [];
+        const studentsForSMS = [];
+        const affectedStudentIds = new Set();
+
+        // Process each marks record
+        for (const record of marksData) {
+            try {
+                // Find student with parent details
+                const student = await Student.findOne({ studentId: record.studentId })
+                    .populate('courseEnrolled')
+                    .session(session);
+                
+                if (!student) {
+                    throw new Error(`Student ${record.studentId} not found`);
+                }
+
+                // Validate student is in correct course and semester
+                if (student.courseEnrolled._id.toString() !== courseDoc._id.toString()) {
+                    throw new Error(`Student ${student.studentId} is not enrolled in this course`);
+                }
+
+                if (student.semester !== parseInt(semester)) {
+                    throw new Error(`Student ${student.studentId} is not in semester ${semester}`);
+                }
+
+                // Calculate marks
+                const theoryObtained = Number(record.theoryObtained) || 0;
+                const practicalObtained = Number(record.practicalObtained) || 0;
+                const vivaObtained = Number(record.vivaObtained) || 0;
+                const assignmentObtained = Number(record.assignmentObtained) || 0;
+                
+                const totalObtained = theoryObtained + practicalObtained + vivaObtained + assignmentObtained;
+                const totalMax = theoryMax + practicalMax + vivaMax + assignmentMax;
+                const percentage = totalMax > 0 ? (totalObtained / totalMax) * 100 : 0;
+
+                // Determine grade
+                const getGrade = (percent) => {
+                    if (percent >= 90) return 'O';
+                    if (percent >= 80) return 'A+';
+                    if (percent >= 70) return 'A';
+                    if (percent >= 60) return 'B+';
+                    if (percent >= 50) return 'B';
+                    if (percent >= 40) return 'C';
+                    if (percent >= 35) return 'D';
+                    return 'F';
+                };
+
+                const grade = getGrade(percentage);
+                const resultStatus = percentage >= 35 ? 'Pass' : 'Fail';
+
+                // Check if marks already exist for this student+subject+examType
+                const existingMarks = await Marks.findOne({
+                    student: student._id,
+                    subject: subject,
+                    examType: examType,
+                    semester: parseInt(semester)
+                }).session(session);
+
+                let marks;
+                
+                if (existingMarks) {
+                    // Update existing marks
+                    existingMarks.marks = {
+                        theory: { max: theoryMax, obtained: theoryObtained },
+                        practical: { max: practicalMax, obtained: practicalObtained },
+                        viva: { max: vivaMax, obtained: vivaObtained },
+                        assignment: { max: assignmentMax, obtained: assignmentObtained }
+                    };
+                    existingMarks.totalMarks = { max: totalMax, obtained: totalObtained };
+                    existingMarks.percentage = percentage;
+                    existingMarks.grade = grade;
+                    existingMarks.resultStatus = resultStatus;
+                    existingMarks.examDate = new Date();
+                    
+                    marks = existingMarks;
+                } else {
+                    // Create new marks
+                    marks = new Marks({
+                        student: student._id,
+                        course: courseDoc._id,
+                        subject: subject,
+                        semester: parseInt(semester),
+                        examType: examType,
+                        examDate: new Date(),
+                        marks: {
+                            theory: { max: theoryMax, obtained: theoryObtained },
+                            practical: { max: practicalMax, obtained: practicalObtained },
+                            viva: { max: vivaMax, obtained: vivaObtained },
+                            assignment: { max: assignmentMax, obtained: assignmentObtained }
+                        },
+                        totalMarks: { max: totalMax, obtained: totalObtained },
+                        percentage: percentage,
+                        grade: grade,
+                        resultStatus: resultStatus,
+                        enteredBy: req.user._id,
+                        isPublished: false
+                    });
+                }
+
+                await marks.save({ session });
+                savedMarks.push(marks);
+                results.success++;
+                
+                affectedStudentIds.add(student._id);
+
+                // Prepare for SMS if requested
+                if (sendSMS && (student.fatherMobile || student.contactNumber)) {
+                    studentsForSMS.push({
+                        student: student,
+                        marks: marks
+                    });
+                }
+
+            } catch (error) {
+                results.failed++;
+                results.errors.push({
+                    studentId: record.studentId,
+                    error: error.message
+                });
             }
-          },
-          enteredBy: req.user._id,
-          isPublished: false
+        }
+
+        // Send SMS notifications in background
+        if (sendSMS && studentsForSMS.length > 0) {
+            try {
+                const smsResults = await SMSService.sendBulkMarksNotifications(
+                    studentsForSMS.map(item => ({
+                        student: item.student,
+                        marks: item.marks,
+                        examType: examType
+                    })),
+                    examType
+                );
+
+                results.smsResults = smsResults;
+                results.smsSent = smsResults.filter(r => r.success).length;
+                results.smsFailed = smsResults.filter(r => !r.success).length;
+                
+            } catch (smsError) {
+                console.error('Bulk SMS error:', smsError);
+                results.smsError = smsError.message;
+            }
+        }
+
+        // Commit transaction
+        await session.commitTransaction();
+        session.endSession();
+
+        // Emit real-time events
+        try {
+            const io = req.app.get('io');
+            if (io) {
+                // Emit to course room
+                io.to(`course:${courseDoc._id}`).emit('marks:added', {
+                    course: courseDoc.courseName,
+                    semester: semester,
+                    subject: subject,
+                    examType: examType,
+                    count: results.success,
+                    timestamp: new Date()
+                });
+
+                // Emit to individual students
+                const studentDocs = await Student.find({ 
+                    _id: { $in: Array.from(affectedStudentIds) } 
+                }).populate('userId');
+                
+                studentDocs.forEach(s => {
+                    if (s.userId) {
+                        io.to(`user:${s.userId._id}`).emit('marks:added', {
+                            subject: subject,
+                            examType: examType,
+                            semester: semester,
+                            studentId: s.studentId
+                        });
+                    }
+                });
+
+                // Emit to admin room
+                io.to('admins').emit('marks:bulkAdded', {
+                    course: courseDoc.courseName,
+                    subject: subject,
+                    examType: examType,
+                    total: results.total,
+                    success: results.success,
+                    failed: results.failed,
+                    smsSent: results.smsSent
+                });
+            }
+        } catch (ioError) {
+            console.error('Socket emit error:', ioError);
+        }
+
+        res.json({
+            success: true,
+            message: 'Marks recorded successfully',
+            data: results
         });
 
-        await marks.save();
-        savedMarks.push(marks);
-        results.success++;
-        affectedStudentIds.add(student._id);
-      } catch (error) {
-        results.failed++;
-        results.errors.push({
-          studentId: record.studentId,
-          error: error.message
+    } catch (error) {
+        if (session.inTransaction()) {
+            await session.abortTransaction();
+        }
+        session.endSession();
+        
+        console.error('Manage Marks Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to record marks',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
-      }
     }
-
-    // Emit events to affected students and course room
-    try {
-      const io = req.app.get('io');
-      if (io) {
-        io.to(`course:${course}`).emit('marks:added', { course, semester, subject, examType });
-        const studentDocs = await Student.find({ _id: { $in: Array.from(affectedStudentIds) } }).select('userId');
-        studentDocs.forEach(s => {
-          if (s.userId) io.to(`user:${s.userId}`).emit('marks:added', { course, semester, subject, examType });
-        });
-      }
-    } catch (err) {
-      console.error('Emit marks event error:', err.message);
-    }
-
-    res.json({
-      success: true,
-      message: 'Marks recorded successfully',
-      data: results
-    });
-  } catch (error) {
-    console.error('Manage Marks Error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to record marks'
-    });
-  }
 };
 
 // @desc    Publish marks
@@ -2945,6 +3116,112 @@ exports.publishMarks = async (req, res) => {
       message: 'Failed to publish marks'
     });
   }
+};
+
+// @desc    Get marks statistics for dashboard
+// @route   GET /api/admin/marks/stats
+// @access  Private (Admin)
+exports.getMarksStats = async (req, res) => {
+    try {
+        const { course, semester, startDate, endDate } = req.query;
+        
+        const match = {};
+        
+        if (course) match.course = course;
+        if (semester) match.semester = parseInt(semester);
+        if (startDate && endDate) {
+            match.examDate = {
+                $gte: new Date(startDate),
+                $lte: new Date(endDate)
+            };
+        }
+
+        const stats = await Marks.aggregate([
+            { $match: match },
+            {
+                $group: {
+                    _id: null,
+                    totalRecords: { $sum: 1 },
+                    averagePercentage: { $avg: '$percentage' },
+                    totalStudents: { $addToSet: '$student' },
+                    passedCount: {
+                        $sum: { $cond: [{ $eq: ['$resultStatus', 'Pass'] }, 1, 0] }
+                    },
+                    failedCount: {
+                        $sum: { $cond: [{ $eq: ['$resultStatus', 'Fail'] }, 1, 0] }
+                    }
+                }
+            },
+            {
+                $project: {
+                    totalRecords: 1,
+                    totalStudents: { $size: '$totalStudents' },
+                    averagePercentage: { $round: ['$averagePercentage', 2] },
+                    passedCount: 1,
+                    failedCount: 1,
+                    passPercentage: {
+                        $round: [{
+                            $cond: [
+                                { $gt: ['$totalRecords', 0] },
+                                { $multiply: [{ $divide: ['$passedCount', '$totalRecords'] }, 100] },
+                                0
+                            ]
+                        }, 2]
+                    }
+                }
+            }
+        ]);
+
+        // Subject-wise statistics
+        const subjectStats = await Marks.aggregate([
+            { $match: match },
+            {
+                $group: {
+                    _id: '$subject',
+                    count: { $sum: 1 },
+                    average: { $avg: '$percentage' },
+                    highest: { $max: '$percentage' },
+                    lowest: { $min: '$percentage' }
+                }
+            },
+            { $sort: { average: -1 } }
+        ]);
+
+        // Grade distribution
+        const gradeStats = await Marks.aggregate([
+            { $match: match },
+            {
+                $group: {
+                    _id: '$grade',
+                    count: { $sum: 1 }
+                }
+            },
+            { $sort: { count: -1 } }
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                overall: stats[0] || {
+                    totalRecords: 0,
+                    totalStudents: 0,
+                    averagePercentage: 0,
+                    passedCount: 0,
+                    failedCount: 0,
+                    passPercentage: 0
+                },
+                subjectStats,
+                gradeStats
+            }
+        });
+
+    } catch (error) {
+        console.error('Get Marks Stats Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch marks statistics'
+        });
+    }
 };
 
 // @desc    Get all marks (admin view)
@@ -3086,7 +3363,7 @@ exports.uploadStudyMaterial = async (req, res) => {
     const downloadData = {
       title: req.body.title,
       description: req.body.description,
-      fileUrl: `/uploads/documents/${req.file.filename}`,
+      fivleUrl: `/uploads/documents/${req.file.filename}`,
       fileName: req.file.originalname,
       fileType: req.body.fileType || getFileType(req.file.mimetype),
       fileSize: req.file.size,

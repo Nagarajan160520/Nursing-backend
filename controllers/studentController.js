@@ -665,6 +665,14 @@ exports.markNotificationAsRead = async (req, res) => {
 
     await notification.markAsRead(req.user._id);
 
+    // Emit real-time event for notification read
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`user:${req.user._id}`).emit('notification:read', {
+        notificationId: notification._id
+      });
+    }
+
     res.json({
       success: true,
       message: 'Notification marked as read'
@@ -756,6 +764,83 @@ exports.getClinicalSchedule = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch clinical schedule'
+    });
+  }
+};
+
+// @desc    Get student statistics
+// @route   GET /api/admin/students/stats
+// @access  Private (Admin)
+exports.getStudentStats = async (req, res) => {
+  try {
+    // Get counts from database
+    const [
+      total,
+      active,
+      completed,
+      onLeave,
+      suspended,
+      male,
+      female
+    ] = await Promise.all([
+      Student.countDocuments(),
+      Student.countDocuments({ academicStatus: 'Active' }),
+      Student.countDocuments({ academicStatus: 'Completed' }),
+      Student.countDocuments({ academicStatus: 'On Leave' }),
+      Student.countDocuments({ academicStatus: 'Suspended' }),
+      Student.countDocuments({ gender: 'Male' }),
+      Student.countDocuments({ gender: 'Female' })
+    ]);
+
+    // Get course distribution
+    const courseDistribution = await Student.aggregate([
+      {
+        $lookup: {
+          from: 'courses',
+          localField: 'courseEnrolled',
+          foreignField: '_id',
+          as: 'course'
+        }
+      },
+      {
+        $unwind: '$course'
+      },
+      {
+        $group: {
+          _id: '$course.courseName',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $sort: { count: -1 }
+      },
+      {
+        $limit: 5
+      }
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        total,
+        active,
+        completed,
+        onLeave,
+        suspended,
+        male,
+        female,
+        courseDistribution: courseDistribution.map(item => ({
+          course: item._id,
+          count: item.count
+        }))
+      }
+    });
+
+  } catch (error) {
+    console.error('Get student stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch statistics'
     });
   }
 };

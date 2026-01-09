@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const studentController = require('../controllers/studentController');
 const { auth, isStudent } = require('../middleware/auth');
-
+const notificationController = require('../controllers/notificationController');
 // Apply auth and student middleware to all routes
 router.use(auth, isStudent);
 
