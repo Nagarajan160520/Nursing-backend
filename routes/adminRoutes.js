@@ -59,6 +59,8 @@ router.get('/students/check-email', adminController.checkEmail);
 router.get('/students/check-mobile', adminController.checkMobile);
 router.get('/students/count', adminController.getStudentCount);
 
+router.get('/students/stats', adminController.getStudentStats);
+router.get('/students/:id', adminController.getStudentDetails);
 // Parameterized routes after specific ones
 router.get('/students/:id', adminController.getStudentDetails);
 router.put('/students/:id', adminController.updateStudent);

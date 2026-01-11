@@ -1886,6 +1886,145 @@ exports.getAllStudents = async (req, res) => {
   }
 };
 
+exports.getStudentDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log('🔄 Fetching student details for ID:', id);
+
+    // Validate student ID
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid student ID format'
+      });
+    }
+
+    // Find student WITHOUT populate first
+    let student = await Student.findById(id)
+      .select('-password -__v')
+      .lean();
+
+    if (!student) {
+      console.log('❌ Student not found for ID:', id);
+      return res.status(404).json({
+        success: false,
+        message: 'Student not found'
+      });
+    }
+
+    console.log('✅ Found basic student info');
+
+    // If courseEnrolled is an ObjectId, populate it
+    if (student.courseEnrolled && mongoose.Types.ObjectId.isValid(student.courseEnrolled)) {
+      const course = await Course.findById(student.courseEnrolled)
+        .select('courseName courseCode duration')
+        .lean();
+      
+      student.courseEnrolled = course;
+      console.log('✅ Populated course info');
+    }
+
+    // Calculate age from dateOfBirth
+    let age = null;
+    if (student.dateOfBirth) {
+      const birthDate = new Date(student.dateOfBirth);
+      const today = new Date();
+      age = today.getFullYear() - birthDate.getFullYear();
+      const monthDiff = today.getMonth() - birthDate.getMonth();
+      
+      if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+    }
+
+    // Get fee details SAFELY
+    let feeDetails = {
+      totalFees: 0,
+      paidFees: 0,
+      dueFees: 0,
+      feeStatus: 'Not Set',
+      hasData: false
+    };
+
+    try {
+      const feeRecord = await Fee.findOne({ student: id })
+        .sort({ createdAt: -1 })
+        .lean();
+      
+      if (feeRecord) {
+        feeDetails = {
+          totalFees: feeRecord.totalFees || 0,
+          paidFees: feeRecord.paidFees || 0,
+          dueFees: feeRecord.dueFees || 0,
+          feeStatus: feeRecord.feeStatus || 'Not Set',
+          hasData: true
+        };
+      }
+    } catch (feeError) {
+      console.log('⚠️ Fee details error:', feeError.message);
+    }
+
+    // Format the response
+    const responseData = {
+      // Basic Information
+      _id: student._id,
+      studentId: student.studentId || '',
+      firstName: student.firstName || '',
+      lastName: student.lastName || '',
+      fullName: `${student.firstName || ''} ${student.lastName || ''}`.trim(),
+      personalEmail: student.personalEmail || '',
+      instituteEmail: student.instituteEmail || '',
+      mobileNumber: student.mobileNumber || '',
+      contactNumber: student.contactNumber || '',
+      gender: student.gender || 'Male',
+      dateOfBirth: student.dateOfBirth || null,
+      age: age,
+      fatherName: student.fatherName || '',
+      fatherMobile: student.fatherMobile || '',
+      motherName: student.motherName || '',
+      motherMobile: student.motherMobile || '',
+      address: student.address || '',
+      guardianDetails: student.guardianDetails || '',
+      
+      // Academic Information
+      courseEnrolled: student.courseEnrolled || null,
+      semester: student.semester || 1,
+      admissionYear: student.admissionYear || new Date().getFullYear(),
+      admissionDate: student.admissionDate || null,
+      academicStatus: student.academicStatus || 'Active',
+      batch: student.batch || null,
+      
+      // Fee Information
+      feeDetails: feeDetails,
+      
+      // Additional Info
+      notes: student.notes || '',
+      createdAt: student.createdAt,
+      updatedAt: student.updatedAt
+    };
+
+    console.log('✅ Student details prepared successfully');
+
+    res.status(200).json({
+      success: true,
+      message: 'Student details retrieved successfully',
+      data: responseData
+    });
+
+  } catch (error) {
+    console.error('❌ Error in getStudentDetails:', error);
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch student details',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+};
 // @desc    Get single student by ID
 // @route   GET /api/admin/students/:id
 // @access  Private (Admin)

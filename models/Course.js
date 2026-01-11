@@ -46,20 +46,21 @@ const courseSchema = new mongoose.Schema({
     totalHours: Number,
     requirements: [String]
   },
-  feesStructure: {
-    tuitionFee: Number,
-    hostelFee: Number,
-    libraryFee: Number,
-    labFee: Number,
-    examFee: Number,
-    otherCharges: Number,
-    totalFee: Number,
-    installmentPlan: [{
-      installmentNo: Number,
-      amount: Number,
-      dueDate: Date
-    }]
-  },
+ feesStructure: {
+  tuitionFee: Number,
+  hostelFee: Number,
+  libraryFee: Number,
+  labFee: Number,
+  examFee: Number,
+  otherCharges: Number,
+  totalFee: Number,
+  installmentPlan: [{
+    installmentNo: Number,
+    amount: Number,
+    dueDate: Date,
+    label: String
+  }]
+},
   seatsAvailable: {
     type: Number,
     required: true,
