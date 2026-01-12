@@ -44,74 +44,87 @@ const upload = require('./middleware/upload');
 const app = express(); 
 
 // ====================
-// SECURITY MIDDLEWARE
+// 🚨 CORS FIX - FIRST MIDDLEWARE
 // ====================
-// Configure helmet to allow cross-origin resource loading for static assets (images)
-const appUrl = process.env.APP_URL || `http://localhost:5000`;
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: 'cross-origin' },
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https:"],
-      imgSrc: ["'self'", 'data:', appUrl, 'https:'],
-      connectSrc: ["'self'", 'https:', 'ws:'],
-      fontSrc: ["'self'", 'https:', 'data:'],
-      objectSrc: ["'none'"],
-      upgradeInsecureRequests: []
-    }
-  }
-})); // Set security HTTP headers (configured for cross-origin images)
+console.log('🌐 CORS Configuration:');
+console.log('FRONTEND_URL from env:', process.env.FRONTEND_URL);
+console.log('NODE_ENV:', process.env.NODE_ENV);
 
-// CORS - allow local dev origins and preflight before any other middleware
-const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'].filter(Boolean);
+// Define allowed origins
+const allowedOrigins = [
+  'https://nursing-institute.vercel.app', // Your Vercel frontend
+  'http://localhost:3000', // Local dev frontend
+  'http://localhost:3001',
+  'https://nursing-backend-60bw.onrender.com' // Backend itself
+];
+
+console.log('✅ Allowed Origins:', allowedOrigins);
+
+// CORS configuration - SIMPLIFIED AND FIXED
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow non-browser requests (Postman, server-to-server) with no origin
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      console.log('🌐 No origin - allowing');
+      return callback(null, true);
+    }
+    
+    // Always allow these origins
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      console.log('✅ Allowed origin:', origin);
+      return callback(null, true);
+    }
+    
+    // In production, be strict
+    if (process.env.NODE_ENV === 'production') {
+      console.log('❌ Blocked by CORS:', origin);
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    }
+    
+    // In development, allow all origins
+    console.log('⚠️ Development mode - allowing all origins:', origin);
+    return callback(null, true);
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Cache-Control'] ,
-  optionsSuccessStatus: 204
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-auth-token', 'Cache-Control'],
+  exposedHeaders: ['x-auth-token', 'Content-Range', 'X-Total-Count'],
+  maxAge: 86400 // 24 hours
 }));
 
-// Ensure preflight requests are handled
+// Handle preflight requests explicitly
 app.options('*', cors());
 
-// Rate limiting (apply after CORS so preflight is allowed)
+// ====================
+// SECURITY MIDDLEWARE
+// ====================
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false // Disable for simplicity, configure properly in production
+}));
+
+// Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  // Increase local dev limit to avoid dev-time 429s, keep stricter limits in production
-  max: process.env.NODE_ENV === 'development' ? 5000 : 1000,
-  message: 'Too many requests from this IP, please try again later.',
-  // Provide standardized rate limit headers and disable legacy headers
+  max: process.env.NODE_ENV === 'development' ? 10000 : 1000,
+  message: { 
+    success: false, 
+    message: 'Too many requests from this IP, please try again later.' 
+  },
   standardHeaders: true,
   legacyHeaders: false
 });
 app.use('/api', limiter);
 
 // Body parser
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 
-// Data sanitization against NoSQL query injection
+// Data sanitization
 app.use(mongoSanitize());
-
-// Data sanitization against XSS
 app.use(xss());
-
-// Prevent parameter pollution
 app.use(hpp());
-
-// CORS configuration moved earlier to ensure preflight requests are handled before rate limiting
-
-// Handle preflight requests
-app.options('*', cors());
 
 // ====================
 // LOGGING MIDDLEWARE
@@ -129,44 +142,25 @@ if (process.env.NODE_ENV === 'development') {
 // ====================
 // STATIC FILES
 // ====================
-// Serve uploads with permissive headers to allow cross-origin image loading from the frontend
+// Serve uploads with proper CORS headers
 app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
   setHeaders: (res, filePath) => {
-    res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Cache-Control', 'public, max-age=31536000');
   }
 }));
 
-// Provide a small inline SVG fallback for missing default profile image to avoid 404 noise in dev
+// Default profile image
 app.get('/uploads/profile/default.jpg', (req, res) => {
   res.type('image/svg+xml');
-  res.send(`<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="200"><rect width="100%" height="100%" fill="#e9ecef"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#6c757d">Profile</text></svg>`);
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+    <svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
+      <rect width="100%" height="100%" fill="#e9ecef"/>
+      <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" 
+            font-family="sans-serif" font-size="24" fill="#6c757d">Profile</text>
+    </svg>`);
 });
-
-// Serve frontend static images (used by placeholder previews)
-const frontendImagesPath = path.join(__dirname, '..', 'frontend', 'public', 'images');
-if (fs.existsSync(frontendImagesPath)) {
-  app.use('/images', express.static(frontendImagesPath, {
-    setHeaders: (res) => {
-      res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
-      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    }
-  }));
-} else {
-  // If images folder doesn't exist, create a placeholder directory to avoid 404s in logs
-  try {
-    fs.mkdirSync(frontendImagesPath, { recursive: true });
-    app.use('/images', express.static(frontendImagesPath, {
-      setHeaders: (res) => {
-        res.setHeader('Access-Control-Allow-Origin', process.env.FRONTEND_URL || '*');
-        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-      }
-    }));
-    console.log(`Created and serving placeholder images directory: ${frontendImagesPath}`);
-  } catch (err) {
-    console.warn('Could not create frontend images directory:', err.message);
-  }
-}
 
 // Create uploads directory if it doesn't exist
 const uploadDirs = [
@@ -221,11 +215,9 @@ app.post('/api/auth/fix-admin', async (req, res) => {
     console.log('🛠️ FIXING ADMIN ACCOUNT...');
     
     const User = require('./models/User');
-    const Admin = require('./models/Admin');
     
     // Delete existing
     await User.deleteMany({ email: 'admin@institute.edu' });
-    await Admin.deleteMany({ email: 'admin@institute.edu' });
     console.log('🗑️ Cleared existing admin data');
     
     // Create password hash DIRECTLY
@@ -250,22 +242,6 @@ app.post('/api/auth/fix-admin', async (req, res) => {
     const db = mongoose.connection.db;
     const userResult = await db.collection('users').insertOne(userDoc);
     console.log('✅ Created admin user');
-    
-    // Create admin profile
-    const adminDoc = {
-      userId: userResult.insertedId,
-      employeeId: 'ADMIN001',
-      fullName: 'System Administrator',
-      designation: 'Administrator',
-      department: 'Administration',
-      contactNumber: '9876543210',
-      email: 'admin@institute.edu',
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    
-    await db.collection('admins').insertOne(adminDoc);
-    console.log('✅ Created admin profile');
     
     // Test the password
     const testUser = await db.collection('users').findOne({ email: 'admin@institute.edu' });
@@ -303,14 +279,13 @@ app.post('/api/auth/test-login', async (req, res) => {
     const user = await db.collection('users').findOne({ email });
     
     if (!user) {
-      return res.json({
+      return res.status(404).json({
         success: false,
         message: 'User not found'
       });
     }
     
     console.log('User found:', user.email);
-    console.log('Password hash:', user.password.substring(0, 30) + '...');
     
     const passwordValid = await bcrypt.compare(password, user.password);
     
@@ -321,7 +296,6 @@ app.post('/api/auth/test-login', async (req, res) => {
         email: user.email,
         role: user.role,
         passwordValid: passwordValid,
-        hash: user.password.substring(0, 30) + '...',
         hashLength: user.password.length
       }
     });
@@ -374,12 +348,6 @@ app.post('/api/auth/direct-login', async (req, res) => {
       { expiresIn: '30d' }
     );
     
-    // Get admin profile if exists
-    let profile = null;
-    if (user.role === 'admin') {
-      profile = await db.collection('admins').findOne({ userId: user._id });
-    }
-    
     console.log('✅ Direct login successful');
     
     res.json({
@@ -392,8 +360,7 @@ app.post('/api/auth/direct-login', async (req, res) => {
         email: user.email,
         role: user.role,
         isActive: user.isActive,
-        profileImage: user.profileImage || '/uploads/profile/default.jpg',
-        profile: profile
+        profileImage: user.profileImage || '/uploads/profile/default.jpg'
       }
     });
     
@@ -435,22 +402,7 @@ const createDefaultAdmin = async () => {
         updatedAt: new Date()
       };
       
-      const userResult = await db.collection('users').insertOne(userDoc);
-      
-      // Create admin profile
-      const adminDoc = {
-        userId: userResult.insertedId,
-        employeeId: 'ADMIN001',
-        fullName: 'System Administrator',
-        designation: 'Administrator',
-        department: 'Administration',
-        contactNumber: '9876543210',
-        email: 'admin@institute.edu',
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-      
-      await db.collection('admins').insertOne(adminDoc);
+      await db.collection('users').insertOne(userDoc);
       
       console.log('✅ Default admin created successfully!');
     } else {
@@ -520,33 +472,34 @@ app.post('/api/admin/news', auth, isAdmin, upload.array('attachments', 5), admin
 app.get('/api/admin/news', auth, isAdmin, adminController.getAllNews);
 app.put('/api/admin/news/:id', auth, isAdmin, adminController.updateNews);
 app.delete('/api/admin/news/:id', auth, isAdmin, adminController.deleteNews);
+
 // Event routes (Admin)
 app.get('/api/admin/events', auth, isAdmin, eventsController.getAllAdminEvents);
 app.post('/api/admin/events', auth, isAdmin, eventsController.createEvent);
 app.put('/api/admin/events/:id', auth, isAdmin, eventsController.updateEvent);
 app.delete('/api/admin/events/:id', auth, isAdmin, eventsController.deleteEvent);
+
+// Student routes
 app.post('/api/admin/students', auth, isAdmin, adminController.addStudent);
 app.get('/api/admin/students', auth, isAdmin, adminController.getAllStudents);
-
-// Essential validation routes (must come before parameterized routes)
 app.get('/api/admin/students/check-email', auth, isAdmin, adminController.checkEmail);
 app.get('/api/admin/students/check-mobile', auth, isAdmin, adminController.checkMobile);
 app.get('/api/admin/students/count', auth, isAdmin, adminController.getStudentCount);
-
-// Parameterized routes after specific ones
 app.get('/api/admin/students/:id', auth, isAdmin, adminController.getStudentDetails);
 app.put('/api/admin/students/:id', auth, isAdmin, adminController.updateStudent);
 app.delete('/api/admin/students/:id', auth, isAdmin, adminController.deleteStudent);
 app.post('/api/admin/students/bulk-upload', auth, isAdmin, upload.single('file'), adminController.bulkUploadStudents);
+
+// Academic routes
 app.post('/api/admin/attendance', auth, isAdmin, adminController.markAttendance);
 app.post('/api/admin/marks', auth, isAdmin, adminController.manageMarks);
 app.put('/api/admin/marks/publish', auth, isAdmin, adminController.publishMarks);
+
+// Content routes
 app.post('/api/admin/downloads', auth, isAdmin, upload.single('file'), adminController.uploadStudyMaterial);
 app.get('/api/admin/downloads', auth, isAdmin, adminController.getAllDownloads);
 app.put('/api/admin/downloads/:id', auth, isAdmin, adminController.updateDownload);
 app.delete('/api/admin/downloads/:id', auth, isAdmin, adminController.deleteDownload);
-
-
 
 // ================
 // STUDENT ROUTES
@@ -665,7 +618,7 @@ app.get('/api/placements/student/:studentId', auth, placementController.getStude
 app.get('/api/placements/company/:companyId', placementController.getCompanyPlacements);
 app.get('/api/placements/year/:year', placementController.getPlacementsByYear);
 app.get('/api/placements/search', placementController.searchPlacements);
- 
+
 // ====================
 // HEALTH CHECK
 // ====================
@@ -677,7 +630,34 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
     environment: process.env.NODE_ENV,
     nodeVersion: process.version,
-    memoryUsage: process.memoryUsage()
+    memoryUsage: process.memoryUsage(),
+    cors: {
+      allowedOrigins: allowedOrigins,
+      frontendUrl: process.env.FRONTEND_URL
+    }
+  });
+});
+
+// ====================
+// TEST ENDPOINTS
+// ====================
+app.get('/api/test-cors', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CORS is working!',
+    origin: req.headers.origin,
+    allowedOrigins: allowedOrigins,
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.post('/api/test-post', (req, res) => {
+  res.json({
+    success: true,
+    message: 'POST request successful',
+    body: req.body,
+    headers: req.headers,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -718,18 +698,28 @@ app.post('/api/upload-test', upload.single('file'), (req, res) => {
 // 404 HANDLER
 // ====================
 app.use('*', (req, res) => {
+  console.log('404 Not Found:', req.method, req.originalUrl);
   res.status(404).json({
     success: false,
     message: `Cannot ${req.method} ${req.originalUrl}`,
     availableEndpoints: {
+      test: [
+        'GET /api/health',
+        'GET /api/test-cors',
+        'POST /api/test-post',
+        'POST /api/upload-test'
+      ],
       auth: [
         'POST /api/auth/login',
         'POST /api/auth/fix-admin (EMERGENCY)',
-        'POST /api/auth/direct-login (EMERGENCY)'
+        'POST /api/auth/direct-login (EMERGENCY)',
+        'POST /api/auth/test-login'
       ],
       public: [
         'GET /api/public/home',
-        'GET /api/public/courses'
+        'GET /api/public/courses',
+        'GET /api/public/gallery',
+        'GET /api/public/news'
       ]
     }
   });
@@ -744,10 +734,19 @@ app.use((err, req, res, next) => {
     stack: err.stack,
     url: req.originalUrl,
     method: req.method,
-    body: req.body,
-    params: req.params,
-    query: req.query
+    origin: req.headers.origin,
+    headers: req.headers
   });
+
+  // CORS errors
+  if (err.message.includes('CORS')) {
+    return res.status(403).json({
+      success: false,
+      message: err.message,
+      allowedOrigins: allowedOrigins,
+      yourOrigin: req.headers.origin
+    });
+  }
 
   // Handle specific error types
   if (err.name === 'ValidationError') {
@@ -788,8 +787,7 @@ app.use((err, req, res, next) => {
     status: status,
     message: err.message || 'Something went wrong!',
     ...(process.env.NODE_ENV === 'development' && { 
-      stack: err.stack,
-      error: err 
+      stack: err.stack
     })
   });
 });
@@ -828,14 +826,20 @@ const server = app.listen(PORT, async () => {
     🚀 NURSING INSTITUTE MANAGEMENT SYSTEM
     ============================================
     📦 Environment: ${process.env.NODE_ENV || 'development'}
-    🌐 Server running on: http://localhost:${PORT}
-    🔗 API Base URL: http://localhost:${PORT}/api
-    📁 Uploads: http://localhost:${PORT}/uploads
+    🌐 Server running on port: ${PORT}
+    🔗 API Base URL: https://nursing-backend-60bw.onrender.com/api
+    📁 Uploads: https://nursing-backend-60bw.onrender.com/uploads
+    ============================================
+    🌐 CORS Configuration:
+    Allowed Origins: ${allowedOrigins.join(', ')}
+    Frontend URL: https://nursing-institute.vercel.app
     ============================================
     📋 EMERGENCY ENDPOINTS:
-    POST /api/auth/fix-admin      - Fix admin account
-    POST /api/auth/direct-login   - Direct login (bypasses everything)
-    POST /api/auth/test-login     - Test password
+    GET  /api/health               - Health check
+    GET  /api/test-cors            - Test CORS
+    POST /api/auth/fix-admin       - Fix admin account
+    POST /api/auth/direct-login    - Direct login
+    POST /api/auth/test-login      - Test password
     ============================================
     👤 ADMIN CREDENTIALS:
     📧 Email: admin@institute.edu
@@ -939,4 +943,4 @@ const gracefulShutdown = (signal) => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-module.exports = app; 
+module.exports = app;
