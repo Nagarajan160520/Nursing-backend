@@ -65,7 +65,7 @@ app.use(helmet({
 })); // Set security HTTP headers (configured for cross-origin images)
 
 // CORS - allow local dev origins and preflight before any other middleware
-const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'].filter(Boolean);
+const allowedOrigins = [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001', 'https://nursing-institute.vercel.app'].filter(Boolean);
 app.use(cors({
   origin: (origin, callback) => {
     // Allow non-browser requests (Postman, server-to-server) with no origin
