@@ -17,6 +17,7 @@ const jwt = require('jsonwebtoken');
 const User = require('./models/User');
 const Student = require('./models/Student');
 
+
 // Load environment variables
 dotenv.config();
 
@@ -29,7 +30,7 @@ const courseController = require('./controllers/courseController');
 const downloadController = require('./controllers/downloadController');
 const facultyController = require('./controllers/facultyController');
 const galleryController = require('./controllers/galleryController');
-const newsController = require('./controllers/newsController');
+const newsController = require('./controllers/newsController'); 
 const placementController = require('./controllers/placementController');
 const eventsController = require('./controllers/eventsController');
 const userController = require('./controllers/userController');
@@ -42,6 +43,44 @@ const { auth, isAdmin, isStudent, isFaculty } = require('./middleware/auth');
 const upload = require('./middleware/upload');
 
 const app = express(); 
+
+// ====================
+// KEEP ALIVE SETUP (Render Sleep Prevention)
+// ====================
+const keepAlive = {
+  isEnabled: true,
+  pingInterval: 10 * 60 * 1000, // 10 minutes
+  
+  start: function() {
+    if (this.isEnabled && process.env.NODE_ENV === 'production') {
+      const axios = require('axios');
+      const BASE_URL = process.env.RENDER_EXTERNAL_URL || 
+                      'https://nursing-backend-60bw.onrender.com'; // CHANGE THIS
+      
+      console.log('🔄 Starting keep-alive service for Render');
+      
+      // Initial ping after 5 seconds
+      setTimeout(() => {
+        this.pingServer(BASE_URL);
+      }, 5000);
+      
+      // Regular ping every 10 minutes
+      setInterval(() => {
+        this.pingServer(BASE_URL);
+      }, this.pingInterval);
+    }
+  },
+  
+  pingServer: async function(baseUrl) {
+    try {
+      const axios = require('axios');
+      await axios.get(`${baseUrl}/keep-alive`, { timeout: 10000 });
+      console.log(`✅ Keep-alive ping sent at ${new Date().toLocaleTimeString()}`);
+    } catch (err) {
+      console.log('🔄 Server might be waking up...');
+    }
+  }
+};
 
 // ====================
 // SECURITY MIDDLEWARE
@@ -485,6 +524,18 @@ const createDefaultAdmin = async () => {
 };
 
 // ====================
+// KEEP ALIVE ENDPOINT
+// ====================
+app.get('/keep-alive', (req, res) => {
+  res.json({ 
+    status: 'active',
+    message: 'Server is awake',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
+});
+
+// ====================
 // API ROUTES
 // ====================
 
@@ -665,7 +716,7 @@ app.get('/api/placements/student/:studentId', auth, placementController.getStude
 app.get('/api/placements/company/:companyId', placementController.getCompanyPlacements);
 app.get('/api/placements/year/:year', placementController.getPlacementsByYear);
 app.get('/api/placements/search', placementController.searchPlacements);
- 
+
 // ====================
 // HEALTH CHECK
 // ====================
@@ -823,6 +874,9 @@ const server = app.listen(PORT, async () => {
   try {
     await connectDB();
     
+    // ✅ START KEEP ALIVE SERVICE
+    keepAlive.start();
+    
     console.log(`
     ============================================
     🚀 NURSING INSTITUTE MANAGEMENT SYSTEM
@@ -831,11 +885,13 @@ const server = app.listen(PORT, async () => {
     🌐 Server running on: http://localhost:${PORT}
     🔗 API Base URL: http://localhost:${PORT}/api
     📁 Uploads: http://localhost:${PORT}/uploads
+    🛡️ Keep-alive: ACTIVE (prevents Render sleep)
     ============================================
     📋 EMERGENCY ENDPOINTS:
     POST /api/auth/fix-admin      - Fix admin account
     POST /api/auth/direct-login   - Direct login (bypasses everything)
     POST /api/auth/test-login     - Test password
+    GET /keep-alive               - Keep server awake
     ============================================
     👤 ADMIN CREDENTIALS:
     📧 Email: admin@institute.edu
@@ -939,4 +995,4 @@ const gracefulShutdown = (signal) => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-module.exports = app; 
+module.exports = app;
